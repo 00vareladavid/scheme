@@ -1,6 +1,6 @@
 * [x] get back to a working state
-* [] port SYMBOL_TABLE to new struct
-* [] add lambda values to architecture
-* [] get lambda values working
+* [x] port SYMBOL_TABLE to new struct
+* [x] add lambda values to architecture
 * [] include symbol environments in architecture
 * [] get symbol environments working
+* [] get lambda values working

@@ -5,5 +5,5 @@ valgrind --tool=memcheck \
          --show-reachable=yes \
          --num-callers=20 \
          --track-fds=yes \
-         --log-file=herpderp \
+         --log-file=memlog \
          ./parsing

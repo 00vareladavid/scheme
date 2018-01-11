@@ -49,6 +49,16 @@
 
 /*
 ********************************************************************************
+UTILS
+********************************************************************************
+*/
+void fucked_up(char* function_name, char* err_msg) {
+  fprintf(stderr, "[ERROR] %s: %s\n", function_name, err_msg);
+  exit(1);
+}
+
+/*
+********************************************************************************
 TYPES
 ********************************************************************************
 */
@@ -365,6 +375,13 @@ lval* lval_copy(lval* v) {
         x->cell[i] = lval_copy(v->cell[i]);
       }
       break;
+    case LVAL_LAMBDA:
+      x->arg_list = lval_copy(v->arg_list);
+      x->exp = lval_copy(v->exp);
+      break;
+    default:
+      fucked_up("lval_copy", "this type doesn't exist, yo!");
+      break;
   }
 
   return x;
@@ -481,13 +498,19 @@ void print_lval(lval* x) {
       for(unsigned i = 0; i < x->count; ++i ) {
         print_lval(x->cell[i]);
       }
-      fputs("}",stdout);
+      fputs("} ",stdout);
       break;
     case LVAL_UNDEF:
       printf("<undef> ");
       break;
     case LVAL_LAMBDA:
-      printf("<lambda> ");
+      printf("<lambda ");
+      print_lval(x->arg_list);
+      print_lval(x->exp);
+      printf("> ");
+      break;
+    default:
+      fucked_up("print_lval","this type doesn't exist,yo!");
       break;
   }
 }
@@ -783,7 +806,6 @@ lval* builtin_lambda(lval* args) {
 
   lval* arg_list = lval_pop(args,0);
   lval* exp = lval_pop(args,0);
-  exp->type = LVAL_SEXP; //TODO is this necessary?
 
   lval* lambda = lval_lambda(arg_list,exp);
   lval_del(args);
@@ -920,7 +942,7 @@ void init_symbol_table(void) {
 //======================================
 void free_symbol_table(void) {
   for(unsigned i = 0; i < SYMBOL_TABLE.count; ++i) {
-    //free(SYMBOL_TABLE.mem[i]->symbol);
+    free(SYMBOL_TABLE.mem[i]->key);
     lval_del(SYMBOL_TABLE.mem[i]->value);
     free(SYMBOL_TABLE.mem[i]);
   }
