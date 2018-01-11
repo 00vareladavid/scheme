@@ -70,6 +70,7 @@ enum { LVAL_NUM ,LVAL_ERR ,LVAL_SEXP ,LVAL_QEXP ,LVAL_SYM, LVAL_BUILTIN, LVAL_LA
 enum { LERR_DIV_ZERO ,LERR_BAD_OP ,LERR_BAD_NUM };
 
 //======================================
+/*
 typedef struct symbol_map {
   char* symbol;
   lval* value;
@@ -80,65 +81,23 @@ typedef struct symbol_table {
   symbol_map** mem;
   unsigned count;
 } symbol_table;
+*/
 
 //======================================
-typedef struct kv {
+typedef struct keyval {
   char* key;
   lval* value;
-} kv;
+} keyval;
 
 typedef struct symbol_map {
-  kv** mem;
+  keyval** mem;
   unsigned count;
 } symbol_map;
 
-typedef struct env {
+typedef struct symbol_env {
   symbol_map** stack;
   unsigned count;
-} env;
-
-env* make_env(void) {
-  env* = malloc(sizeof(env));
-  env->stack = NULL;
-  env->count = 0;
-  return env;
-}
-
-symbol_map* make_symbol_map(void) {
-  symbol_map* sym_map = malloc(sizeof(symbol_map));
-  sym_map->mem = NULL;
-  sym_map->count = 0;
-  return sym_map;
-}
-
-// WARNING: this function assumes:
-// * arg_list->count == args->count
-// * arg_list is a sexp with only LVAL_SYM as children
-// * args is a sexp
-unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args) {
-  unsigned count = arg_list->count;
-  for(unsigned i = 0; i < count; ++i) {
-    push_kv(sym_map, arg_list->cell[i]->symbol, args->cell[i]);
-  }
-
-  return 0;
-}
-
-//TODO inputs are being destroyed, is this correct?
-unsigned push_kv(symbol_map* sym_map, char* key, lval* value) {
-  //make room
-  sym_map->count++;
-  sym_map->mem = realloc(sym_map->mem, sym_map->count);
-  //TODO errror check above
-
-  sym_map->mem[count-1] = malloc(sizeof(kv));
-  //TODO errror check above
-  keyval* kv = sym_map->mem[count-1];
-  kv->key = key;
-  kv->value = value;
-
-  return 0;
-}
+} symbol_env;
 
 /*
 ********************************************************************************
@@ -166,6 +125,7 @@ lval* eval_sexp(lval* v);
 lval* apply_op(char* op, lval* x, lval* y);
 lval* builtin_op(char* op, lval* v);
 lval* dispatch_builtin(lval* func, lval* args);
+lval* dispatch_func(lval* func, lval* args);
 
 lval* lval_pop(lval* sexp, unsigned index);
 lval* lval_take(lval* sexp, unsigned index);
@@ -187,7 +147,9 @@ lval* builtin_append(lval* args);
 lval* builtin_lambda(lval* args);
 
 lval* sym_map_search(symbol_map* sym_map, char* key);
-lval* sym_search(env* env, char* key);
+lval* sym_search(symbol_env* env, char* key);
+unsigned push_kv(symbol_map* sym_map, char* key, lval* value);
+unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args);
 
 /*
 ********************************************************************************
@@ -205,7 +167,7 @@ char* strdup(char* input) {
 GLOBAL MEM
 ********************************************************************************
 */
-symbol_table SYMBOL_TABLE = {NULL, 0};
+symbol_map SYMBOL_TABLE = {NULL, 0};
 
 /*
 ********************************************************************************
@@ -550,7 +512,7 @@ lval* eval_lval(lval* v) {
       return v;
       break;
     case LVAL_LAMBDA:
-      retrun v;//TODO
+      return v;//TODO
       break;
   }
 
@@ -563,7 +525,6 @@ lval* eval_sexp(lval* v) {
   //assuming v is not empty;
 
   //split v into first_val and input args
-  lval* return_val = NULL;
   lval* first_val = lval_pop(v, 0);
   lval* args = v;//just renaming for clarity
 
@@ -576,7 +537,7 @@ lval* eval_sexp(lval* v) {
     case LVAL_LAMBDA:
       return dispatch_func(func,args);
       break;
-    case default:
+    default:
       lval_del(func);
       lval_del(args);
       return lval_err("1st element of sexp list is not a func");
@@ -603,13 +564,14 @@ lval* dispatch_func(lval* func, lval* args) {
   //set up env
   //symbol_map* sym_map = populate_sym_map(env, func->arg_list, args);
 
-  lval* return_val = lval_sexp(env, func->exp);
+  //lval* return_val = eval_sexp(env, func->exp);
+  lval* return_val = eval_sexp(func->exp);
   lval_del(func);
   return return_val;
 }
 
 //======================================
-lval* sym_search(env* env, char* key) {
+lval* sym_search(symbol_env* env, char* key) {
   unsigned index;
   for(unsigned i = 0; i < env->count; ++i) {
     index = env->count - 1 - i;
@@ -974,7 +936,7 @@ unsigned symbol_add(char* symbol, lval* value) {
   }
 
   SYMBOL_TABLE.count++;
-  symbol_map** new_mem = realloc(SYMBOL_TABLE.mem, sizeof(symbol_map) * SYMBOL_TABLE.count);
+  keyval** new_mem = realloc(SYMBOL_TABLE.mem, sizeof(symbol_map) * SYMBOL_TABLE.count);
 
   /*
   if( !new_mem ) {
@@ -985,8 +947,8 @@ unsigned symbol_add(char* symbol, lval* value) {
   */
 
   SYMBOL_TABLE.mem = new_mem;
-  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1] = malloc(sizeof(symbol_map));
-  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1]->symbol = symbol;
+  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1] = malloc(sizeof(keyval));
+  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1]->key = symbol;
   SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1]->value = value;
 
   return 0;
@@ -997,11 +959,54 @@ unsigned symbol_add(char* symbol, lval* value) {
 lval* symbol_find(char* x) {
   //debug
   for(unsigned i = 0; i < SYMBOL_TABLE.count; ++i) {
-    if( !strcmp(SYMBOL_TABLE.mem[i]->symbol, x) ){
+    if( !strcmp(SYMBOL_TABLE.mem[i]->key, x) ){
       //printf("value is [%d]\n",SYMBOL_TABLE.mem[i]->value->num);
       return SYMBOL_TABLE.mem[i]->value;
     }
   }
 
   return NULL;
+}
+
+symbol_env* make_env(void) {
+  symbol_env* env= malloc(sizeof(symbol_env));
+  env->stack = NULL;
+  env->count = 0;
+  return env;
+}
+
+symbol_map* make_symbol_map(void) {
+  symbol_map* sym_map = malloc(sizeof(symbol_map));
+  sym_map->mem = NULL;
+  sym_map->count = 0;
+  return sym_map;
+}
+
+// WARNING: this function assumes:
+// * arg_list->count == args->count
+// * arg_list is a sexp with only LVAL_SYM as children
+// * args is a sexp
+unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args) {
+  unsigned count = arg_list->count;
+  for(unsigned i = 0; i < count; ++i) {
+    push_kv(sym_map, arg_list->cell[i]->sym, args->cell[i]);
+  }
+
+  return 0;
+}
+
+//TODO inputs are being destroyed, is this correct?
+unsigned push_kv(symbol_map* sym_map, char* key, lval* value) {
+  //make room
+  sym_map->count++;
+  sym_map->mem = realloc(sym_map->mem, sym_map->count);
+  //TODO errror check above
+
+  sym_map->mem[sym_map->count - 1] = malloc(sizeof(keyval));
+  //TODO errror check above
+  keyval* kv = sym_map->mem[sym_map->count - 1];
+  kv->key = key;
+  kv->value = value;
+
+  return 0;
 }
