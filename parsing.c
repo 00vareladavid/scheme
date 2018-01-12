@@ -165,9 +165,10 @@ lval* builtin_append(lval* args);
 lval* sym_map_search(symbol_map* sym_map, char* key);
 lval* sym_search(symbol_env* env, char* key);
 unsigned push_kv(symbol_map* sym_map, char* key, lval* value);
-unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args);
+unsigned populate_symbol_env(symbol_env* sym_env, lval* arg_list, lval* args);
 unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map);
 symbol_map* make_symbol_map(void);
+unsigned symbol_env_pop(symbol_env*);
 
 /*
 ********************************************************************************
@@ -593,14 +594,15 @@ lval* dispatch_func(symbol_env* sym_env, lval* func, lval* args) {
   }
 
   //set up env
-  //symbol_map* sym_map = populate_sym_map(env, func->arg_list, args);
+  populate_symbol_env(sym_env, func->arg_list, args);
 
-  //lval* return_val = eval_sexp(env, func->exp);
-  //
-  lval* return_val = eval_sexp(sym_env, func->exp);
+  //evaluate
+  lval* exp = func->exp;
+  exp->type = LVAL_SEXP;
+  lval* return_val = eval_sexp(sym_env, exp);
   
   //clean up
-  //pop env
+  symbol_env_pop(sym_env);
   lval_del(func);
   return return_val;
 }
@@ -1042,11 +1044,18 @@ symbol_map* make_symbol_map(void) {
 // * arg_list->count == args->count
 // * arg_list is a sexp with only LVAL_SYM as children
 // * args is a sexp
-unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args) {
+unsigned populate_symbol_env(symbol_env* sym_env, lval* arg_list, lval* args) {
+  //create blank slate;
+  symbol_map* sym_map = make_symbol_map();
+
+  //populate
   unsigned count = arg_list->count;
   for(unsigned i = 0; i < count; ++i) {
     push_kv(sym_map, arg_list->cell[i]->sym, args->cell[i]);
   }
+
+  //push
+  sym_env_push(sym_env,sym_map);
 
   return 0;
 }
@@ -1064,6 +1073,15 @@ unsigned push_kv(symbol_map* sym_map, char* key, lval* value) {
   keyval* kv = sym_map->mem[sym_map->count - 1];
   kv->key = key;
   kv->value = value;
+
+  return 0;
+}
+
+//======================================
+unsigned symbol_env_pop(symbol_env* sym_env) {
+  sym_env->count--;
+  free_symbol_map(sym_env->stack[sym_env->count]);
+  sym_env->stack = realloc(sym_env->stack, sym_env->count);
 
   return 0;
 }
