@@ -76,22 +76,8 @@ typedef struct lval {
   struct lval** cell;
 } lval;
 
-enum { LVAL_NUM ,LVAL_ERR ,LVAL_SEXP ,LVAL_QEXP ,LVAL_SYM, LVAL_BUILTIN, LVAL_LAMBDA, LVAL_UNDEF};
-enum { LERR_DIV_ZERO ,LERR_BAD_OP ,LERR_BAD_NUM };
-
-//======================================
-/*
-typedef struct symbol_map {
-  char* symbol;
-  lval* value;
-} symbol_map;
-
-
-typedef struct symbol_table {
-  symbol_map** mem;
-  unsigned count;
-} symbol_table;
-*/
+enum { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP, LVAL_SYM, LVAL_BUILTIN, LVAL_LAMBDA, LVAL_UNDEF};
+enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
 
 //======================================
 typedef struct keyval {
@@ -108,6 +94,24 @@ typedef struct symbol_env {
   symbol_map** stack;
   unsigned count;
 } symbol_env;
+
+symbol_env* make_symbol_env(void) {
+  symbol_env* sym_env = malloc(sizeof(symbol_env));
+  sym_env->stack = NULL;
+  sym_env->count = 0;
+  return sym_env;
+}
+
+unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map) {
+  //make room
+  sym_env->count++;
+  sym_env->stack = realloc(sym_env->stack, sym_env->count);
+  //TODO error check
+  //push
+  sym_env->stack[sym_env->count-1] = sym_map;
+
+  return 0;
+}
 
 /*
 ********************************************************************************
@@ -130,36 +134,40 @@ lval* read_num(mpc_ast_t* t);
 
 void print_lval(lval* x);
 
-lval* eval_lval(lval* v);
-lval* eval_sexp(lval* v);
+lval* eval_lval(symbol_env*, lval* v);
+lval* eval_sexp(symbol_env*, lval* v);
 lval* apply_op(char* op, lval* x, lval* y);
-lval* builtin_op(char* op, lval* v);
-lval* dispatch_builtin(lval* func, lval* args);
-lval* dispatch_func(lval* func, lval* args);
+lval* builtin_op(symbol_env*, char* op, lval* v);
+lval* dispatch_builtin(symbol_env*, lval* func, lval* args);
+lval* dispatch_func(symbol_env*, lval* func, lval* args);
 
 lval* lval_pop(lval* sexp, unsigned index);
 lval* lval_take(lval* sexp, unsigned index);
 lval* lval_join(lval* x, lval* y);
 char* lval_type_string(lval* v );
 
-unsigned symbol_add(char* symbol, lval* value);
-lval* symbol_find(char* x);
-lval* eval_symbol(lval* x);
+unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value);
+lval* symbol_find(symbol_map* sym_map, char* x);
+lval* eval_symbol(symbol_env* sym_env, lval* x);
 
-void init_symbol_table(void);
-void free_symbol_table(void);
+unsigned init_symbol_env(symbol_env*);
+unsigned free_symbol_map(symbol_map*);
+unsigned free_symbol_env(symbol_env* sym_env);
 
-lval* builtin_define(lval* args);
+lval* builtin_define(symbol_env* sym_env, lval* args);
+lval* builtin_eval(symbol_env* sym_env, lval* args);
+lval* builtin_lambda(lval* args);
 lval* builtin_head(lval* args);
 lval* builtin_tail(lval* args);
 lval* builtin_list(lval* args);
 lval* builtin_append(lval* args);
-lval* builtin_lambda(lval* args);
 
 lval* sym_map_search(symbol_map* sym_map, char* key);
 lval* sym_search(symbol_env* env, char* key);
 unsigned push_kv(symbol_map* sym_map, char* key, lval* value);
 unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args);
+unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map);
+symbol_map* make_symbol_map(void);
 
 /*
 ********************************************************************************
@@ -177,7 +185,6 @@ char* strdup(char* input) {
 GLOBAL MEM
 ********************************************************************************
 */
-symbol_map SYMBOL_TABLE = {NULL, 0};
 
 /*
 ********************************************************************************
@@ -186,7 +193,8 @@ MAIN
 */
 int main(int argc, char* argv[] ) {
 //INIT
-  init_symbol_table();
+  symbol_env* sym_env= make_symbol_env();
+  init_symbol_env(sym_env);
 
   //Parser
   mpc_parser_t* Number = mpc_new("number");
@@ -230,7 +238,7 @@ int main(int argc, char* argv[] ) {
       //mpc_ast_print(r.output);//DEBUG
 
       lval* x = read_lval(r.output);
-      lval* y = eval_lval(x);
+      lval* y = eval_lval(sym_env, x);
       print_lval(y);
       puts("\n========================================");
 
@@ -249,7 +257,7 @@ int main(int argc, char* argv[] ) {
 
   //clean up
   mpc_cleanup(4, Number, Symbol, Sexp, Qexp, Expr, Lispy);
-  free_symbol_table();
+  free_symbol_env(sym_env);
   return 0;
 }
 
@@ -521,13 +529,13 @@ EVAL
 ********************************************************************************
 */
 //input will be destroyed
-lval* eval_lval(lval* v) {
+lval* eval_lval(symbol_env* sym_env, lval* v) {
   switch( v->type ) {
     case LVAL_SYM:
-      return eval_symbol(v);
+      return eval_symbol(sym_env, v);
       break;
     case LVAL_SEXP:
-      return eval_sexp(v);
+      return eval_sexp(sym_env, v);
       break;
     case LVAL_NUM:
     case LVAL_UNDEF:
@@ -544,7 +552,7 @@ lval* eval_lval(lval* v) {
 
 //======================================
 // input: `v` will be freed
-lval* eval_sexp(lval* v) {
+lval* eval_sexp(symbol_env* sym_env, lval* v) {
   //assuming v is not empty;
 
   //split v into first_val and input args
@@ -552,13 +560,13 @@ lval* eval_sexp(lval* v) {
   lval* args = v;//just renaming for clarity
 
   //call dispatch function based on function type
-  lval* func = eval_lval(first_val);
+  lval* func = eval_lval(sym_env, first_val);
   switch( func->type ) {
     case LVAL_BUILTIN:
-      return dispatch_builtin(func,args);
+      return dispatch_builtin(sym_env, func, args);
       break;
     case LVAL_LAMBDA:
-      return dispatch_func(func,args);
+      return dispatch_func(sym_env, func, args);
       break;
     default:
       lval_del(func);
@@ -569,7 +577,7 @@ lval* eval_sexp(lval* v) {
 }
 
 //======================================
-lval* dispatch_func(lval* func, lval* args) {
+lval* dispatch_func(symbol_env* sym_env, lval* func, lval* args) {
   //preconditions
   if( args->count < func->arg_list->count ) {
     //clean up
@@ -581,14 +589,18 @@ lval* dispatch_func(lval* func, lval* args) {
 
   //eval children
   for( unsigned i = 0; i < args->count; ++i ) {
-    args->cell[i] = eval_lval(args->cell[i]);
+    args->cell[i] = eval_lval(sym_env, args->cell[i]);
   }
 
   //set up env
   //symbol_map* sym_map = populate_sym_map(env, func->arg_list, args);
 
   //lval* return_val = eval_sexp(env, func->exp);
-  lval* return_val = eval_sexp(func->exp);
+  //
+  lval* return_val = eval_sexp(sym_env, func->exp);
+  
+  //clean up
+  //pop env
   lval_del(func);
   return return_val;
 }
@@ -621,18 +633,18 @@ lval* sym_map_search(symbol_map* sym_map, char* key) {
 }
 
 //======================================
-lval* dispatch_builtin(lval* func, lval* args) {
+lval* dispatch_builtin(symbol_env* sym_env, lval* func, lval* args) {
   lval* return_val;
 
   //SPECIAL functions
   if(!strcmp("define", func->sym)) {
-    return_val = builtin_define(args);
+    return_val = builtin_define(sym_env, args);
   } else {
     //IF NOT SPECIAL, EVAL ALL CHILDREN AND CALL FUNCTION
 
     //eval children
     for( unsigned i = 0; i < args->count; ++i ) {
-      args->cell[i] = eval_lval(args->cell[i]);
+      args->cell[i] = eval_lval(sym_env, args->cell[i]);
     }
 
     //error handling
@@ -642,7 +654,7 @@ lval* dispatch_builtin(lval* func, lval* args) {
       }
     }
 
-    return_val = builtin_op(func->sym, args);
+    return_val = builtin_op(sym_env, func->sym, args);
   }
 
   //clean up and return
@@ -651,7 +663,7 @@ lval* dispatch_builtin(lval* func, lval* args) {
 }
 
 //======================================
-lval* builtin_define(lval* args) {
+lval* builtin_define(symbol_env* sym_env, lval* args) {
   if( 2 != args->count ) {
     return lval_err("eval accepts exactly 2 args");
   }
@@ -669,8 +681,8 @@ lval* builtin_define(lval* args) {
   args->cell[1] = NULL;
   lval_del(args);
   
-  x = eval_lval(x);
-  unsigned err = symbol_add(symbol,x);
+  x = eval_lval(sym_env, x);
+  unsigned err = symbol_add(sym_env->stack[sym_env->count-1], symbol,x);//TODO remove this dirty hack
   if( 1 == err ) {
     return lval_err("symbol already exists");
   }
@@ -756,7 +768,7 @@ lval* lval_join(lval* x, lval* y) {
 }
 
 //======================================
-lval* builtin_eval(lval* args) {
+lval* builtin_eval(symbol_env* sym_env, lval* args) {
     if( 1 != args->count ) {
       return lval_err("eval accepts exactly 1 arg");
     }
@@ -767,14 +779,14 @@ lval* builtin_eval(lval* args) {
     }
 
     input->type = LVAL_SEXP;
-    return eval_lval(input);
+    return eval_lval(sym_env, input);
 }
 
 //======================================
 // PURPOSE: dispatch function based on `op`
 // NOTE: args will be destroyed
 // TODO what if op is not a builtin?
-lval* builtin_op(char* op, lval* args) {
+lval* builtin_op(symbol_env* sym_env, char* op, lval* args) {
 
   if( !strcmp(op,"list") ) {
     return builtin_list(args);
@@ -785,7 +797,7 @@ lval* builtin_op(char* op, lval* args) {
   } else if( !strcmp(op, "append") ){
     return builtin_append(args);
   } else if( !strcmp(op, "eval") ){
-    return builtin_eval(args);
+    return builtin_eval(sym_env, args);
   } else if( !strcmp(op, "lambda") ){
     return builtin_lambda(args);
   }
@@ -814,8 +826,8 @@ lval* builtin_lambda(lval* args) {
 
 //======================================
 //look for symbol, if value found, return a copy
-lval* eval_symbol(lval* x) {
-  lval* v = symbol_find(x->sym);
+lval* eval_symbol(symbol_env* sym_env, lval* x) {
+  lval* v = sym_search(sym_env, x->sym);
 
   if( !v ) {
     lval_del(x);
@@ -924,72 +936,92 @@ SYMBOL UTILS
 */
 //======================================
 //add all builtin keywords
-void init_symbol_table(void) {
+unsigned init_symbol_env(symbol_env* sym_env) {
   //TODO error checking
+  //TODO refactor this into symbol_env_new_layer() and symbol_env_add_symbol()
+  symbol_map* sym_map = make_symbol_map();
 
-  symbol_add(strdup("define"),lval_builtin("define"));
-  symbol_add(strdup("head"),lval_builtin("head"));
-  symbol_add(strdup("tail"),lval_builtin("tail"));
-  symbol_add(strdup("list"),lval_builtin("list"));
-  symbol_add(strdup("join"),lval_builtin("join"));
-  symbol_add(strdup("+"),lval_builtin("+"));
-  symbol_add(strdup("-"),lval_builtin("-"));
-  symbol_add(strdup("*"),lval_builtin("*"));
-  symbol_add(strdup("/"),lval_builtin("/"));
-  symbol_add(strdup("lambda"),lval_builtin("lambda"));
+  symbol_add(sym_map, strdup("define"), lval_builtin("define"));
+  symbol_add(sym_map, strdup("head"),   lval_builtin("head"));
+  symbol_add(sym_map, strdup("tail"),   lval_builtin("tail"));
+  symbol_add(sym_map, strdup("list"),   lval_builtin("list"));
+  symbol_add(sym_map, strdup("join"),   lval_builtin("join"));
+  symbol_add(sym_map, strdup("+"),      lval_builtin("+"));
+  symbol_add(sym_map, strdup("-"),      lval_builtin("-"));
+  symbol_add(sym_map, strdup("*"),      lval_builtin("*"));
+  symbol_add(sym_map, strdup("/"),      lval_builtin("/"));
+  symbol_add(sym_map, strdup("lambda"), lval_builtin("lambda"));
+
+  sym_env_push(sym_env, sym_map);
+  return 0;
 }
 
 //======================================
-void free_symbol_table(void) {
-  for(unsigned i = 0; i < SYMBOL_TABLE.count; ++i) {
-    free(SYMBOL_TABLE.mem[i]->key);
-    lval_del(SYMBOL_TABLE.mem[i]->value);
-    free(SYMBOL_TABLE.mem[i]);
+unsigned free_symbol_map(symbol_map* sym_map) {
+  for(unsigned i = 0; i < sym_map->count; ++i) {
+    free(sym_map->mem[i]->key);
+    lval_del(sym_map->mem[i]->value);
+    free(sym_map->mem[i]);
   }
 
-  free(SYMBOL_TABLE.mem);
+  free(sym_map->mem);
+  free(sym_map);
+  return 0;
+}
+
+//======================================
+unsigned free_symbol_env(symbol_env* sym_env) {
+  for(unsigned i = 0; i < sym_env->count; ++i) {
+    free_symbol_map(sym_env->stack[i]);
+  }
+
+  free(sym_env->stack);
+  free(sym_env);
+  return 0;
 }
 
 //======================================
 //WARNING: this expects symbol and value to already be allocated!!!
-unsigned symbol_add(char* symbol, lval* value) {
-  if( symbol_find(symbol) ) {
+unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value) {
+  //make sure there is something in the symbol_map before you being searching
+  if( sym_map && symbol_find(sym_map, symbol) ) {
     return 1;
   }
 
-  SYMBOL_TABLE.count++;
-  keyval** new_mem = realloc(SYMBOL_TABLE.mem, sizeof(symbol_map) * SYMBOL_TABLE.count);
+  sym_map->count++;
+  keyval** new_mem = realloc(sym_map->mem, sizeof(keyval*) * sym_map->count);
 
   /*
   if( !new_mem ) {
     //TODO have to free the whole table
-    free(SYMBOL_TABLE.mem);
+    free(sym_map->mem);
     return lval_err("memory allocation error");
   }
   */
 
-  SYMBOL_TABLE.mem = new_mem;
-  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1] = malloc(sizeof(keyval));
-  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1]->key = symbol;
-  SYMBOL_TABLE.mem[SYMBOL_TABLE.count - 1]->value = value;
-
+  sym_map->mem = new_mem;
+  sym_map->mem[sym_map->count - 1] = malloc(sizeof(keyval));
+  sym_map->mem[sym_map->count - 1]->key = symbol;
+  sym_map->mem[sym_map->count - 1]->value = value;
+  
   return 0;
 }
 
 //======================================
 //WARNING: this returns a pointer into SYMBOL_TABLE
-lval* symbol_find(char* x) {
+lval* symbol_find(symbol_map* sym_map, char* x) {
   //debug
-  for(unsigned i = 0; i < SYMBOL_TABLE.count; ++i) {
-    if( !strcmp(SYMBOL_TABLE.mem[i]->key, x) ){
-      //printf("value is [%d]\n",SYMBOL_TABLE.mem[i]->value->num);
-      return SYMBOL_TABLE.mem[i]->value;
+  for(unsigned i = 0; i < sym_map->count; ++i) {
+    if( !strcmp(sym_map->mem[i]->key, x) ){
+      //printf("value is [%d]\n",sym_map->mem[i]->value->num);
+      return sym_map->mem[i]->value;
     }
   }
 
   return NULL;
 }
 
+//======================================
 symbol_env* make_env(void) {
   symbol_env* env= malloc(sizeof(symbol_env));
   env->stack = NULL;
@@ -997,6 +1029,7 @@ symbol_env* make_env(void) {
   return env;
 }
 
+//======================================
 symbol_map* make_symbol_map(void) {
   symbol_map* sym_map = malloc(sizeof(symbol_map));
   sym_map->mem = NULL;
@@ -1004,6 +1037,7 @@ symbol_map* make_symbol_map(void) {
   return sym_map;
 }
 
+//======================================
 // WARNING: this function assumes:
 // * arg_list->count == args->count
 // * arg_list is a sexp with only LVAL_SYM as children
@@ -1017,6 +1051,7 @@ unsigned populate_symbol_map(symbol_map* sym_map, lval* arg_list, lval* args) {
   return 0;
 }
 
+//======================================
 //TODO inputs are being destroyed, is this correct?
 unsigned push_kv(symbol_map* sym_map, char* key, lval* value) {
   //make room
