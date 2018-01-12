@@ -133,7 +133,7 @@ lval* lval_lambda(lval* arg_list, lval* exp);
 
 //lval utils
 void  lval_del(lval* v);
-lval* lval_copy(lval* v);
+unsigned lval_copy(lval* src, lval** dest);
 unsigned lval_add(lval* v, lval* child);
 lval* lval_pop(lval* sexp, unsigned index);
 lval* lval_take(lval* sexp, unsigned index);
@@ -371,37 +371,41 @@ void lval_del(lval* v) {
 }
 
 //======================================
-lval* lval_copy(lval* v) {
-  lval* x = malloc(sizeof(lval));
-  x->type = v->type;
-  switch(x->type) {
+unsigned lval_copy(lval* src, lval** dest) {
+  *dest = malloc(sizeof(lval));
+  lval* y = *dest;
+  y->type = src->type;
+  switch(y->type) {
     //do nothing for LVAL_UNDEF
     case LVAL_NUM:
-      x->num = v->num;
+      y->num = src->num;
       break;
     case LVAL_BUILTIN:
     case LVAL_SYM:
-      x->sym = malloc(sizeof(char) * (strlen(v->sym) + 1));
-      strcpy(x->sym, v->sym);
+      y->sym = malloc(sizeof(char) * (strlen(src->sym) + 1));
+      strcpy(y->sym, src->sym);
       break;
     case LVAL_QEXP:
     case LVAL_SEXP:
-      x->count = v->count;
-      x->cell = malloc(sizeof(lval*) * x->count);
-      for(unsigned i = 0; i < x->count; ++i) {
-        x->cell[i] = lval_copy(v->cell[i]);
+      y->count = src->count;
+      y->cell = malloc(sizeof(lval*) * y->count);
+      for(unsigned i = 0; i < y->count; ++i) {
+        lval_copy(src->cell[i], &(y->cell[i]));
+        //y->cell[i] = lval_copy(src->cell[i]);
       }
       break;
     case LVAL_LAMBDA:
-      x->arg_list = lval_copy(v->arg_list);
-      x->exp = lval_copy(v->exp);
+      lval_copy(src->arg_list, &(y->arg_list));
+      //y->arg_list = lval_copy(src->arg_list);
+      lval_copy(src->exp, &(y->exp));
+      //y->exp = lval_copy(src->exp);
       break;
     default:
       fucked_up("lval_copy", "this type doesn't exist, yo!");
       break;
   }
 
-  return x;
+  return 0;
 }
 
 /*
@@ -846,7 +850,10 @@ lval* eval_symbol(symbol_env* sym_env, lval* x) {
   }
   
   lval_del(x);
-  return lval_copy(v);
+  lval* ret;
+  lval_copy(v,&ret);
+  return ret;
+  //return lval_copy(v);
 }
 
 //======================================

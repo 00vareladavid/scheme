@@ -5,5 +5,9 @@
  * [x] finish init_symbol_map
  * [x] port SYMBOL_TABLE to symbol_env
 * [x] get symbol environments working
-* [] get lambda values working
+* [x] get lambda values working
+* [] refactor error signaling
+ * [] complete error handling
+* [] refactor memory
+* [] use hashmaps instead of arrays
 
