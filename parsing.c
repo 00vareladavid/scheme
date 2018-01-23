@@ -248,7 +248,7 @@ int main(int argc, char* argv[] ) {
      "
     ,Number ,Symbol ,Sexp ,Qexp ,Expr ,Lispy);
   
-//REPL
+  //REPL
   puts("Lispy v0.1.0");
   puts("Enter 'quit' to quit\n");
 
@@ -266,30 +266,40 @@ int main(int argc, char* argv[] ) {
 
     //parsing
     mpc_result_t r;
+    lval *x, *y;
     if( mpc_parse("<stdin>", input, Lispy, &r)) {
       //parsed good, then eval
       //mpc_ast_print(r.output);//DEBUG
 
-      lval* x = read_lval(r.output, err);
-      if( err->sig ){ return 0; }
+      x = read_lval(r.output, err);
+      if( err->sig ){
+	lval_del(x);
+	printf("[ERR] Unable to READ lval due to insufficient memory\n");
 
-      lval* y = eval_lval(sym_env, x, err);
-      if( err->sig ){ return 0; }
+	err->sig = OK;
+	goto clean_repl;
+      }
+
+      y = eval_lval(sym_env, x, err);
+      if( err->sig ){
+	lval_del(y);
+	printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
+
+	err->sig = OK;
+	goto clean_repl;
+      }
 
       print_lval(y);
       puts("\n========================================");
-
-      //clean (in reverse order);
       lval_del(y);
-      mpc_ast_delete(r.output);
     } else {
       //parsed bad
       mpc_err_print(r.error);
       mpc_err_delete(r.error);
     }
 
-    //clean up
-    free(input);
+    clean_repl:
+      free(input);
   }
 
   //clean up
@@ -503,15 +513,14 @@ READING
 ********************************************************************************
 */
 lval* read_lval(mpc_ast_t* t, err_t* err) {
+  lval* v = NULL;
+
   if( strstr(t->tag,"number") ) {
-    //puts("num");
-    return read_num(t, err);
+    v = read_num(t, err);
   } else if( strstr(t->tag,"symbol") ) {
-    //puts("sym");
-    return lval_sym(t->contents, err);
+    v = lval_sym(t->contents, err);
   } else if( strstr(t->tag,"qexp") ) {
-    //puts("qexp");
-    lval* v = lval_qexp(err);
+    v = lval_qexp(err);
     unsigned count = t->children_num;
 
     //if not a bracket, then it is a child value
@@ -523,10 +532,8 @@ lval* read_lval(mpc_ast_t* t, err_t* err) {
       } 
     }
 
-    return v;
   } else if( strstr(t->tag,"sexp") ) {
-    //puts("**sexp");
-    lval* v = lval_sexp(err);
+    v = lval_sexp(err);
     unsigned count = t->children_num;
 
     //if not a bracket, then it is a child value
@@ -538,13 +545,15 @@ lval* read_lval(mpc_ast_t* t, err_t* err) {
       }
     }
 
-    return v;
   } else if( !strcmp(t->tag,">") ) {
-    //toplevel
-    return read_lval(t->children[1], err);
+    v = read_lval(t->children[1], err);
   } else {
-    return lval_undef(err);
+    v = lval_undef(err);
   }
+
+  //clean and return
+  mpc_ast_delete(t);
+  return v;
 }
 
 //======================================
