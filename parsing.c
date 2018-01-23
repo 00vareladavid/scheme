@@ -166,7 +166,7 @@ lval* dispatch_builtin(symbol_env*, lval* func, lval* args, err_t* err);
 lval* dispatch_lambda(symbol_env*, lval* func, lval* args, err_t* err);
 
 //env utils
-void init_symbol_env(symbol_env*, err_t* );
+symbol_env* init_symbol_env( err_t* );
 void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
 unsigned free_symbol_map(symbol_map*);
 unsigned free_symbol_env(symbol_env* sym_env);
@@ -214,25 +214,18 @@ MAIN
 ********************************************************************************
 */
 int main(int argc, char* argv[] ) {
-//INIT
+  //INIT
   err_t* err = malloc(sizeof(err_t));
   if( !err ) {
     printf("1 insufficient mem for baseline framework\n");
     exit(1);
   }
 
-  symbol_env* sym_env = make_symbol_env(err);
-  if( err->sig ){
-    free(err);//DEBUG [valgrind]
-    printf("2 insufficient mem for baseline framework\n");
-    exit(1);
-  }
-
-  init_symbol_env(sym_env, err);
+  symbol_env* sym_env = init_symbol_env(err);
   if( err->sig ){
     free(err);
     free_symbol_env(sym_env);
-    printf("3 insufficient mem for baseline framework\n");
+    printf("2 insufficient mem for baseline framework\n");
     exit(1);
   }
 
@@ -1072,14 +1065,17 @@ char* builtin_names[] = { "define", "lambda",
                          "+", "-", "*", "/",
 	                 NULL };
   
-void init_symbol_env(symbol_env* sym_env, err_t* err) {
-
+symbol_env* init_symbol_env(err_t* err) {
+  symbol_env* sym_env = make_symbol_env(err);
+  if( err->sig ){
+    return sym_env;
+  }
 
   //TODO refactor this into symbol_env_new_layer() and symbol_env_add_symbol()
   symbol_map* sym_map = make_symbol_map(err);
   if( err->sig ){
     free_symbol_map(sym_map);
-    return;
+    return sym_env;
   }
 
   char* x;
@@ -1087,12 +1083,13 @@ void init_symbol_env(symbol_env* sym_env, err_t* err) {
     push_builtin(sym_map, x, err);
     if( err->sig ){
       free_symbol_map(sym_map);
-      return;
+      return sym_env;
     }
   }
 
   sym_env_push(sym_env, sym_map, err);
   //just propogate error signal; nothing to clean
+  return sym_env;
 }
 
 void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
