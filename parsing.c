@@ -57,6 +57,12 @@
 UTILS
 ********************************************************************************
 */
+
+int mallocfail = -7;
+
+#define oldmalloc(x) (malloc(x))
+#define malloc(x) ( (1 == ++mallocfail) ? NULL : oldmalloc(x) )
+
 void fucked_up(char* function_name, char* err_msg) {
   fprintf(stderr, "[ERROR] %s: %s\n", function_name, err_msg);
   exit(1);
@@ -119,23 +125,6 @@ symbol_env* make_symbol_env(err_t* err) {
   return sym_env;
 }
 
-unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
-  //make room
-  symbol_map** new_stack = realloc(sym_env->stack, sizeof(symbol_map*) * (sym_env->count + 1));
-  if( new_stack ){
-    sym_env->count++;
-    sym_env->stack = new_stack;
-    new_stack[sym_env->count - 1] = NULL;
-  } else {
-    err->sig = OUT_OF_MEM;
-    return 0;
-  }
-
-  //push
-  sym_env->stack[sym_env->count-1] = sym_map;
-  return 0;
-}
-
 /*
 ********************************************************************************
 PROTOTYPES
@@ -177,7 +166,8 @@ lval* dispatch_builtin(symbol_env*, lval* func, lval* args, err_t* err);
 lval* dispatch_lambda(symbol_env*, lval* func, lval* args, err_t* err);
 
 //env utils
-unsigned init_symbol_env(symbol_env*, err_t* );
+void init_symbol_env(symbol_env*, err_t* );
+void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
 unsigned free_symbol_map(symbol_map*);
 unsigned free_symbol_env(symbol_env* sym_env);
 
@@ -227,16 +217,24 @@ int main(int argc, char* argv[] ) {
 //INIT
   err_t* err = malloc(sizeof(err_t));
   if( !err ) {
-    free(err);//DEBUG [valgrind]
-    printf("insufficient mem for baseline framework\n");
+    printf("1 insufficient mem for baseline framework\n");
     exit(1);
   }
 
-  symbol_env* sym_env= make_symbol_env(err);
-  if( err->sig ){ return 0; }
+  symbol_env* sym_env = make_symbol_env(err);
+  if( err->sig ){
+    free(err);//DEBUG [valgrind]
+    printf("2 insufficient mem for baseline framework\n");
+    exit(1);
+  }
 
   init_symbol_env(sym_env, err);
-  if( err->sig ){ return 0; }
+  if( err->sig ){
+    free(err);
+    free_symbol_env(sym_env);
+    printf("3 insufficient mem for baseline framework\n");
+    exit(1);
+  }
 
   //Parser
   mpc_parser_t* Number = mpc_new("number");
@@ -303,7 +301,7 @@ int main(int argc, char* argv[] ) {
 
   //clean up
   free(err);//DEBUG [valgrind]
-  mpc_cleanup(4, Number, Symbol, Sexp, Qexp, Expr, Lispy);
+  mpc_cleanup(6, Number, Symbol, Sexp, Qexp, Expr, Lispy);
   free_symbol_env(sym_env);
   return 0;
 }
@@ -1068,28 +1066,57 @@ SYMBOL UTILS
 */
 //======================================
 //add all builtin keywords
-unsigned init_symbol_env(symbol_env* sym_env, err_t* err) {
-  //TODO error checking
+
+char* builtin_names[] = { "define", "lambda", 
+	                 "head", "tail", "list", "join",
+                         "+", "-", "*", "/",
+	                 NULL };
+  
+void init_symbol_env(symbol_env* sym_env, err_t* err) {
+
+
   //TODO refactor this into symbol_env_new_layer() and symbol_env_add_symbol()
   symbol_map* sym_map = make_symbol_map(err);
+  if( err->sig ){
+    free_symbol_map(sym_map);
+    return;
+  }
 
-  symbol_add(sym_map, strdup("define", err), lval_builtin("define", err), err);
-  symbol_add(sym_map, strdup("head", err),   lval_builtin("head", err), err);
-  symbol_add(sym_map, strdup("tail", err),   lval_builtin("tail", err), err);
-  symbol_add(sym_map, strdup("list", err),   lval_builtin("list", err), err);
-  symbol_add(sym_map, strdup("join", err),   lval_builtin("join", err), err);
-  symbol_add(sym_map, strdup("+", err),      lval_builtin("+", err), err);
-  symbol_add(sym_map, strdup("-", err),      lval_builtin("-", err), err);
-  symbol_add(sym_map, strdup("*", err),      lval_builtin("*", err), err);
-  symbol_add(sym_map, strdup("/", err),      lval_builtin("/", err), err);
-  symbol_add(sym_map, strdup("lambda", err), lval_builtin("lambda", err), err);
+  char* x;
+  for(unsigned i = 0; (x = builtin_names[i]); ++i) {
+    push_builtin(sym_map, x, err);
+    if( err->sig ){
+      free_symbol_map(sym_map);
+      return;
+    }
+  }
 
   sym_env_push(sym_env, sym_map, err);
-  return 0;
+  //just propogate error signal; nothing to clean
+}
+
+void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
+  char* funx = strdup(fun_name, err);
+  if( err->sig ){
+    free(funx);
+    return;
+  }
+
+  lval* xx = lval_builtin(fun_name, err);
+  if( err->sig ){
+    free(funx);
+    lval_del(xx);
+    return;
+  }
+
+  symbol_add(sym_map, funx, xx, err);
+  //just propogate the error signal upwards; nothing to clean up
 }
 
 //======================================
 unsigned free_symbol_map(symbol_map* sym_map) {
+  if( !sym_map ){ return 0; }
+
   for(unsigned i = 0; i < sym_map->count; ++i) {
     free(sym_map->mem[i]->key);
     lval_del(sym_map->mem[i]->value);
@@ -1103,6 +1130,8 @@ unsigned free_symbol_map(symbol_map* sym_map) {
 
 //======================================
 unsigned free_symbol_env(symbol_env* sym_env) {
+  if( !sym_env ){ return 0; }
+
   for(unsigned i = 0; i < sym_env->count; ++i) {
     free_symbol_map(sym_env->stack[i]);
   }
@@ -1127,6 +1156,8 @@ unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) 
     sym_map->mem[sym_map->count - 1] = NULL;
   } else {
     err->sig = OUT_OF_MEM;
+    free(symbol);
+    lval_del(value);
     return 0;
   }
 
@@ -1135,6 +1166,8 @@ unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) 
     sym_map->mem[sym_map->count - 1] = new_kv;
   } else {
     err->sig = OUT_OF_MEM;
+    free(symbol);
+    lval_del(value);
     return 0;  
   }
 
@@ -1255,3 +1288,24 @@ unsigned symbol_env_pop(symbol_env* sym_env, err_t* err) {
 
   return 0;
 }
+
+//======================================
+unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
+  //make room
+  symbol_map** new_stack = realloc(sym_env->stack, sizeof(symbol_map*) * (sym_env->count + 1));
+  if( new_stack ){
+    sym_env->count++;
+    sym_env->stack = new_stack;
+    new_stack[sym_env->count - 1] = NULL;
+  } else {
+    err->sig = OUT_OF_MEM;
+    free_symbol_map(sym_map);
+    return 0;
+  }
+
+  //push
+  sym_env->stack[sym_env->count - 1] = sym_map;
+  return 0;
+}
+
+
