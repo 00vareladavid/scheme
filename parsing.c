@@ -35,6 +35,8 @@
  * clearly specify who is responsible for what memory
 * don't mix static and dynamic pointers
  * ie dynamically allocated strings and strings on the heap
+## Error Handling
+* after every xalloc, handle the split between 'enough mem' and 'out of mem'
 --------------------------------------------------------------------------------
 # After
 * review C build process
@@ -107,6 +109,11 @@ typedef struct symbol_env {
 
 symbol_env* make_symbol_env(err_t* err) {
   symbol_env* sym_env = malloc(sizeof(symbol_env));
+  if( !sym_env ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   sym_env->stack = NULL;
   sym_env->count = 0;
   return sym_env;
@@ -114,12 +121,18 @@ symbol_env* make_symbol_env(err_t* err) {
 
 unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
   //make room
-  sym_env->count++;
-  sym_env->stack = realloc(sym_env->stack, sizeof(symbol_map*) * sym_env->count);
-  //TODO error check
+  symbol_map** new_stack = realloc(sym_env->stack, sizeof(symbol_map*) * (sym_env->count + 1));
+  if( new_stack ){
+    sym_env->count++;
+    sym_env->stack = new_stack;
+    new_stack[sym_env->count - 1] = NULL;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;
+  }
+
   //push
   sym_env->stack[sym_env->count-1] = sym_map;
-
   return 0;
 }
 
@@ -141,6 +154,7 @@ lval* lval_lambda(lval* arg_list, lval* exp, err_t* err);
 //lval utils
 void  lval_del(lval* v);
 lval* lval_copy(lval* v, err_t* err);
+void lval_copy_cell(lval* out, lval* in, err_t* err);
 unsigned lval_add(lval* v, lval* child, err_t* err);
 lval* lval_pop(lval* sexp, unsigned index, err_t* err);
 lval* lval_take(lval* sexp, unsigned index, err_t* err);
@@ -193,9 +207,14 @@ unsigned symbol_env_pop(symbol_env*, err_t* err);
 SHOULD BE IN string.h
 ********************************************************************************
 */
-char* strdup(char* input) {
+char* strdup(char* input, err_t* err) {
   char* x = malloc(sizeof(char) * (strlen(input) + 1));
-  strcpy(x,input);
+  if( !x ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
+  strcpy(x, input);
   return x;
 }
 
@@ -207,13 +226,17 @@ MAIN
 int main(int argc, char* argv[] ) {
 //INIT
   err_t* err = malloc(sizeof(err_t));
+  if( !err ) {
+    free(err);//DEBUG [valgrind]
+    printf("insufficient mem for baseline framework\n");
+    exit(1);
+  }
 
   symbol_env* sym_env= make_symbol_env(err);
   if( err->sig ){ return 0; }
 
   init_symbol_env(sym_env, err);
   if( err->sig ){ return 0; }
-
 
   //Parser
   mpc_parser_t* Number = mpc_new("number");
@@ -279,6 +302,7 @@ int main(int argc, char* argv[] ) {
   }
 
   //clean up
+  free(err);//DEBUG [valgrind]
   mpc_cleanup(4, Number, Symbol, Sexp, Qexp, Expr, Lispy);
   free_symbol_env(sym_env);
   return 0;
@@ -291,6 +315,11 @@ CONSTRUCTORS/DESTRUCTORS
 */
 lval* lval_num(long number, err_t* err) {
   lval* v = malloc(sizeof(lval));
+  if( !v ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   v->type = LVAL_NUM;
   v->num = number;
 
@@ -300,9 +329,13 @@ lval* lval_num(long number, err_t* err) {
 //======================================
 lval* lval_err(char* err_msg, err_t* err) {
   lval* v = malloc(sizeof(lval));
+  if( !v ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   v->type = LVAL_ERR;
-  v->err = malloc(sizeof(char) * (strlen(err_msg) + 1));
-  strcpy(v->err, err_msg);
+  v->err = strdup(err_msg, err);
 
   return v;
 }
@@ -310,15 +343,25 @@ lval* lval_err(char* err_msg, err_t* err) {
 //======================================
 lval* lval_sym(char* sym_string, err_t* err) {
   lval* v = malloc(sizeof(lval));
+  if( !v ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   v->type = LVAL_SYM;
-  v->sym  = malloc(sizeof(char) * (strlen(sym_string) + 1));
-  strcpy(v->sym, sym_string);
+  v->sym = strdup(sym_string, err);
+
   return v;
 }
 
 //======================================
 lval* lval_sexp(err_t* err) {
   lval* v  = malloc(sizeof(lval));
+  if( !v ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   v->type  = LVAL_SEXP;
   v->count = 0;
   v->cell  = NULL;
@@ -328,6 +371,11 @@ lval* lval_sexp(err_t* err) {
 //======================================
 lval* lval_qexp(err_t* err) {
   lval* v = malloc(sizeof(lval));
+  if( !v ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   v->type = LVAL_QEXP;
   v->count = 0;
   v->cell = NULL;
@@ -344,6 +392,11 @@ lval* lval_builtin(char* func_key, err_t* err) {
 //======================================
 lval* lval_undef(err_t* err) {
   lval* x = malloc(sizeof(lval));
+  if( !x ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   x->type = LVAL_UNDEF;
   return x;
 }
@@ -351,6 +404,11 @@ lval* lval_undef(err_t* err) {
 //======================================
 lval* lval_lambda(lval* arg_list, lval* exp, err_t* err) {
   lval* lambda = malloc(sizeof(lval));
+  if( !lambda ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   lambda->type = LVAL_LAMBDA;
   lambda->arg_list = arg_list;
   lambda->exp = exp;
@@ -398,6 +456,11 @@ void lval_del(lval* v) {
 //======================================
 lval* lval_copy(lval* v, err_t* err) {
   lval* x = malloc(sizeof(lval));
+  if( !x ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
   x->type = v->type;
   switch(x->type) {
     //do nothing for LVAL_UNDEF
@@ -408,17 +471,11 @@ lval* lval_copy(lval* v, err_t* err) {
       break;
     case LVAL_BUILTIN:
     case LVAL_SYM:
-      //TODO add strdup
-      x->sym = malloc(sizeof(char) * (strlen(v->sym) + 1));
-      strcpy(x->sym, v->sym);
+      x->sym = strdup(v->sym, err);
       break;
     case LVAL_QEXP:
     case LVAL_SEXP:
-      x->count = v->count;
-      x->cell = malloc(sizeof(lval*) * x->count);
-      for(unsigned i = 0; i < x->count; ++i) {
-        x->cell[i] = lval_copy(v->cell[i], err);
-      }
+      lval_copy_cell(x, v, err); 
       break;
     case LVAL_LAMBDA:
       x->arg_list = lval_copy(v->arg_list, err);
@@ -430,6 +487,23 @@ lval* lval_copy(lval* v, err_t* err) {
   }
 
   return x;
+}
+
+//======================================
+void lval_copy_cell(lval* out, lval* in, err_t* err){
+  lval** new_cell = malloc(sizeof(lval*) * in->count);
+  if( new_cell ){
+    out->count = in->count;
+    out->cell = new_cell;
+  } else {
+    err->sig = OUT_OF_MEM;
+    lval_del(out);
+    return;
+  }
+
+  for(unsigned i = 0; i < out->count; ++i) {
+    out->cell[i] = lval_copy(in->cell[i], err);
+  }
 }
 
 /*
@@ -930,9 +1004,17 @@ lval* lval_pop(lval* sexp, unsigned index, err_t* err) {
   memmove(&sexp->cell[index],
           &sexp->cell[index+1],
           sizeof(lval*) * (sexp->count - (index + 1)));
+
   //reflect true size
-  sexp->count--;
-  sexp->cell = realloc(sexp->cell, sizeof(lval*) * sexp->count);
+  lval** new_cell = realloc(sexp->cell, sizeof(lval*) * (sexp->count - 1));
+  if( new_cell ){
+    sexp->count--;
+    sexp->cell = new_cell;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;
+  }
+
   return x;
 }
 
@@ -991,16 +1073,16 @@ unsigned init_symbol_env(symbol_env* sym_env, err_t* err) {
   //TODO refactor this into symbol_env_new_layer() and symbol_env_add_symbol()
   symbol_map* sym_map = make_symbol_map(err);
 
-  symbol_add(sym_map, strdup("define"), lval_builtin("define", err), err);
-  symbol_add(sym_map, strdup("head"),   lval_builtin("head", err), err);
-  symbol_add(sym_map, strdup("tail"),   lval_builtin("tail", err), err);
-  symbol_add(sym_map, strdup("list"),   lval_builtin("list", err), err);
-  symbol_add(sym_map, strdup("join"),   lval_builtin("join", err), err);
-  symbol_add(sym_map, strdup("+"),      lval_builtin("+", err), err);
-  symbol_add(sym_map, strdup("-"),      lval_builtin("-", err), err);
-  symbol_add(sym_map, strdup("*"),      lval_builtin("*", err), err);
-  symbol_add(sym_map, strdup("/"),      lval_builtin("/", err), err);
-  symbol_add(sym_map, strdup("lambda"), lval_builtin("lambda", err), err);
+  symbol_add(sym_map, strdup("define", err), lval_builtin("define", err), err);
+  symbol_add(sym_map, strdup("head", err),   lval_builtin("head", err), err);
+  symbol_add(sym_map, strdup("tail", err),   lval_builtin("tail", err), err);
+  symbol_add(sym_map, strdup("list", err),   lval_builtin("list", err), err);
+  symbol_add(sym_map, strdup("join", err),   lval_builtin("join", err), err);
+  symbol_add(sym_map, strdup("+", err),      lval_builtin("+", err), err);
+  symbol_add(sym_map, strdup("-", err),      lval_builtin("-", err), err);
+  symbol_add(sym_map, strdup("*", err),      lval_builtin("*", err), err);
+  symbol_add(sym_map, strdup("/", err),      lval_builtin("/", err), err);
+  symbol_add(sym_map, strdup("lambda", err), lval_builtin("lambda", err), err);
 
   sym_env_push(sym_env, sym_map, err);
   return 0;
@@ -1038,10 +1120,24 @@ unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) 
     return 1;
   }
 
-  sym_map->count++;
-  sym_map->mem = realloc(sym_map->mem, sizeof(keyval*) * sym_map->count);
+  keyval** new_mem = realloc(sym_map->mem, sizeof(keyval*) * (sym_map->count + 1));
+  if( new_mem ){
+    sym_map->mem = new_mem;
+    sym_map->count++;
+    sym_map->mem[sym_map->count - 1] = NULL;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;
+  }
 
-  sym_map->mem[sym_map->count - 1] = malloc(sizeof(keyval));
+  keyval* new_kv = malloc(sizeof(keyval));
+  if( new_kv ){
+    sym_map->mem[sym_map->count - 1] = new_kv;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;  
+  }
+
   sym_map->mem[sym_map->count - 1]->key = symbol;
   sym_map->mem[sym_map->count - 1]->value = value;
   
@@ -1067,6 +1163,11 @@ lval* symbol_find(symbol_map* sym_map, char* x) {
 //======================================
 symbol_env* make_env(err_t* err) {
   symbol_env* env= malloc(sizeof(symbol_env));
+  if( !env ){
+   err->sig = OUT_OF_MEM;
+   return NULL;
+  }
+
   env->stack = NULL;
   env->count = 0;
   return env;
@@ -1075,6 +1176,11 @@ symbol_env* make_env(err_t* err) {
 //======================================
 symbol_map* make_symbol_map(err_t* err) {
   symbol_map* sym_map = malloc(sizeof(symbol_map));
+  if( !sym_map ){
+   err->sig = OUT_OF_MEM;
+   return NULL;
+  }
+
   sym_map->mem = NULL;
   sym_map->count = 0;
   return sym_map;
@@ -1111,24 +1217,41 @@ unsigned populate_symbol_env(symbol_env* sym_env, lval* arg_list, lval* args, er
 //TODO inputs are being destroyed, is this correct?
 unsigned push_kv(symbol_map* sym_map, char* key, lval* value, err_t* err) {
   //make room
-  sym_map->count++;
-  sym_map->mem = realloc(sym_map->mem, sizeof(keyval*) * sym_map->count);
-  //TODO errror check above
+  keyval** new_mem = realloc(sym_map->mem, sizeof(keyval*) * (sym_map->count + 1) );
+  if( new_mem ){
+    sym_map->mem = new_mem;
+    sym_map->count++;
+    new_mem[sym_map->count - 1] = NULL;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;
+  }
 
-  sym_map->mem[sym_map->count - 1] = malloc(sizeof(keyval));
-  //TODO errror check above
-  keyval* kv = sym_map->mem[sym_map->count - 1];
+  keyval* kv = malloc(sizeof(keyval));
+  if( kv ){
+    sym_map->mem[sym_map->count - 1] = kv;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;
+  }
+
   kv->key = key;
   kv->value = value;
-
   return 0;
 }
 
 //======================================
 unsigned symbol_env_pop(symbol_env* sym_env, err_t* err) {
   free_symbol_map(sym_env->stack[sym_env->count - 1]);
-  sym_env->count--;
-  sym_env->stack = realloc(sym_env->stack, sizeof(symbol_map*) * sym_env->count);
+
+  symbol_map** new_stack = realloc(sym_env->stack, sizeof(symbol_map*) * (sym_env->count - 1));
+  if( new_stack ){
+    sym_env->count--;
+    sym_env->stack = new_stack;
+  } else {
+    err->sig = OUT_OF_MEM;
+    return 0;
+  }
 
   return 0;
 }
