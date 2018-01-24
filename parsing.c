@@ -52,11 +52,9 @@
 #include "linenoise/linenoise.h"
 #include "mpc/mpc.h"
 
-/*
-********************************************************************************
-UTILS
-********************************************************************************
-*/
+/********************************************************************************
+* UTILS
+********************************************************************************/
 
 int mallocfail = -5000;
 
@@ -68,11 +66,9 @@ void fucked_up(char* function_name, char* err_msg) {
   exit(1);
 }
 
-/*
-********************************************************************************
-TYPES
-********************************************************************************
-*/
+/********************************************************************************
+* TYPES
+********************************************************************************/
 typedef enum err_sig_t {OK, OUT_OF_MEM} err_sig_t;
 
 typedef struct err_t {
@@ -103,16 +99,19 @@ typedef struct keyval {
   lval* value;
 } keyval;
 
+//======================================
 typedef struct symbol_map {
   keyval** mem;
   unsigned count;
 } symbol_map;
 
+//======================================
 typedef struct symbol_env {
   symbol_map** stack;
   unsigned count;
 } symbol_env;
 
+//======================================
 symbol_env* make_symbol_env(err_t* err) {
   symbol_env* sym_env = malloc(sizeof(symbol_env));
   if( !sym_env ){
@@ -125,11 +124,9 @@ symbol_env* make_symbol_env(err_t* err) {
   return sym_env;
 }
 
-/*
-********************************************************************************
-PROTOTYPES
-********************************************************************************
-*/
+/********************************************************************************
+* PROTOTYPES
+********************************************************************************/
 
 //constructors
 lval* lval_num(long x, err_t* err);
@@ -183,7 +180,6 @@ lval* builtin_append(lval* args, err_t* err);
 
 //symbol utils
 unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err);
-//lval* symbol_find(symbol_map* sym_map, char* x);
 lval* eval_symbol(symbol_env* sym_env, lval* x, err_t* err);
 lval* sym_map_search(symbol_map* sym_map, char* key);
 lval* sym_search(symbol_env* env, char* key);
@@ -193,11 +189,9 @@ unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err);
 symbol_map* make_symbol_map(err_t* err);
 unsigned symbol_env_pop(symbol_env*, err_t* err);
 
-/*
-********************************************************************************
-SHOULD BE IN string.h
-********************************************************************************
-*/
+/********************************************************************************
+* SHOULD BE IN string.h
+********************************************************************************/
 char* strdup(char* input, err_t* err) {
   char* x = malloc(sizeof(char) * (strlen(input) + 1));
   if( !x ){
@@ -209,11 +203,9 @@ char* strdup(char* input, err_t* err) {
   return x;
 }
 
-/*
-********************************************************************************
-MAIN
-********************************************************************************
-*/
+/********************************************************************************
+* MAIN
+********************************************************************************/
 int main(int argc, char* argv[] ) {
   //INIT
   err_t* err = malloc(sizeof(err_t));
@@ -312,11 +304,9 @@ int main(int argc, char* argv[] ) {
   return 0;
 }
 
-/*
-********************************************************************************
-CONSTRUCTORS/DESTRUCTORS
-********************************************************************************
-*/
+/********************************************************************************
+* CONSTRUCTORS/DESTRUCTORS
+********************************************************************************/
 lval* lval_num(long number, err_t* err) {
   lval* v = malloc(sizeof(lval));
   if( !v ){
@@ -510,11 +500,9 @@ void lval_copy_cell(lval* out, lval* in, err_t* err){
   }
 }
 
-/*
-********************************************************************************
-READING
-********************************************************************************
-*/
+/********************************************************************************
+* READING
+********************************************************************************/
 lval* read_lval(mpc_ast_t* t, err_t* err) {
   if( strstr(t->tag,"number") ) {
     return read_num(t, err);
@@ -577,14 +565,13 @@ void read_children(lval* parent, mpc_ast_t* t, err_t* err) {
 //======================================
 //append a child to sexp
 unsigned lval_add(lval* v, lval* child, err_t* err) {
-  v->count++;
-
-  lval** new_mem = realloc(v->cell, sizeof(lval*) * v->count );
+  lval** new_mem = realloc(v->cell, sizeof(lval*) * (v->count + 1) );
   if( NULL == new_mem ) {
     puts("***MEMORY ALLOCATION ERROR***");
     free(v->cell);
     exit(1);
   }
+  v->count++;
   v->cell = new_mem;
 
   v->cell[v->count - 1] = child;
@@ -603,11 +590,9 @@ lval* read_num(mpc_ast_t* t, err_t* err) {
   return lval_num(num, err);
 }
 
-/*
-********************************************************************************
-PRINT
-********************************************************************************
-*/
+/********************************************************************************
+* PRINT
+********************************************************************************/
 void print_lval(lval* x) {
   switch( x->type ) {
     case LVAL_NUM:
@@ -648,11 +633,9 @@ void print_lval(lval* x) {
   }
 }
 
-/*
-********************************************************************************
-EVAL
-********************************************************************************
-*/
+/********************************************************************************
+* EVAL
+********************************************************************************/
 //input will be destroyed
 lval* eval_lval(symbol_env* sym_env, lval* v, err_t* err) {
   switch( v->type ) {
@@ -988,11 +971,9 @@ lval* apply_op(char* op, lval* x, lval* y, err_t* err) {
   return x;
 }
 
-/*
-********************************************************************************
-LVAL UTILS
-********************************************************************************
-*/
+/********************************************************************************
+* LVAL UTILS
+********************************************************************************/
 lval* lval_pop(lval* sexp, unsigned index, err_t* err) {
   //#special case of a single element
   if( 1 == sexp->count ){
@@ -1074,11 +1055,9 @@ char* lval_type_string(lval* v ) {
   return "UNKNOWN TYPE";
 }
 
-/*
-********************************************************************************
-SYMBOL UTILS
-********************************************************************************
-*/
+/********************************************************************************
+* SYMBOL UTILS
+********************************************************************************/
 //======================================
 //add all builtin keywords
 
@@ -1087,6 +1066,7 @@ char* builtin_names[] = { "define", "lambda",
                          "+", "-", "*", "/",
 	                 NULL };
   
+//======================================
 symbol_env* init_symbol_env(err_t* err) {
   symbol_env* sym_env = make_symbol_env(err);
   if( err->sig ){
@@ -1114,6 +1094,7 @@ symbol_env* init_symbol_env(err_t* err) {
   return sym_env;
 }
 
+//======================================
 void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
   char* funx = strdup(fun_name, err);
   if( err->sig ){
@@ -1195,22 +1176,6 @@ unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) 
   
   return 0;
 }
-
-/*
-//======================================
-//WARNING: this returns a pointer into SYMBOL_TABLE
-lval* symbol_find(symbol_map* sym_map, char* x) {
-  //debug
-  for(unsigned i = 0; i < sym_map->count; ++i) {
-    if( !strcmp(sym_map->mem[i]->key, x) ){
-      //printf("value is [%d]\n",sym_map->mem[i]->value->num);
-      return sym_map->mem[i]->value;
-    }
-  }
-
-  return NULL;
-}
-*/
 
 //======================================
 symbol_env* make_env(err_t* err) {
