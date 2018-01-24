@@ -611,19 +611,15 @@ PRINT
 void print_lval(lval* x) {
   switch( x->type ) {
     case LVAL_NUM:
-      //puts("num");
       printf("%ld ", x->num);
       break;
     case LVAL_SYM:
-      //puts("sym");
       printf("%s ", x->sym);
       break;
     case LVAL_ERR:
-      //puts("err");
       printf("[ERROR: %s] ", x->err);
       break;
     case LVAL_SEXP:
-      //puts("sexp");
       printf("(");
       for(unsigned i = 0; i < x->count; ++i ) {
         print_lval(x->cell[i]);
@@ -631,7 +627,6 @@ void print_lval(lval* x) {
       printf(")");
       break;
     case LVAL_QEXP:
-      //puts("qexp");
       fputs("{",stdout);
       for(unsigned i = 0; i < x->count; ++i ) {
         print_lval(x->cell[i]);
