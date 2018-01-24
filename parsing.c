@@ -58,7 +58,7 @@ UTILS
 ********************************************************************************
 */
 
-int mallocfail = -7;
+int mallocfail = -5000;
 
 #define oldmalloc(x) (malloc(x))
 #define malloc(x) ( (1 == ++mallocfail) ? NULL : oldmalloc(x) )
@@ -152,6 +152,7 @@ char* lval_type_string(lval* v);
 
 //reader utils
 lval* read_lval(mpc_ast_t* t, err_t* err);
+void read_children(lval* parent, mpc_ast_t* t, err_t* err);
 lval* read_num(mpc_ast_t* t, err_t* err);
 
 //printer utils
@@ -220,6 +221,7 @@ int main(int argc, char* argv[] ) {
     printf("1 insufficient mem for baseline framework\n");
     exit(1);
   }
+  err->sig = OK;
 
   symbol_env* sym_env = init_symbol_env(err);
   if( err->sig ){
@@ -272,6 +274,7 @@ int main(int argc, char* argv[] ) {
       //mpc_ast_print(r.output);//DEBUG
 
       x = read_lval(r.output, err);
+      mpc_ast_delete(r.output);
       if( err->sig ){
 	lval_del(x);
 	printf("[ERR] Unable to READ lval due to insufficient memory\n");
@@ -513,47 +516,62 @@ READING
 ********************************************************************************
 */
 lval* read_lval(mpc_ast_t* t, err_t* err) {
-  lval* v = NULL;
-
   if( strstr(t->tag,"number") ) {
-    v = read_num(t, err);
+    return read_num(t, err);
   } else if( strstr(t->tag,"symbol") ) {
-    v = lval_sym(t->contents, err);
+    return lval_sym(t->contents, err);
   } else if( strstr(t->tag,"qexp") ) {
-    v = lval_qexp(err);
-    unsigned count = t->children_num;
-
-    //if not a bracket, then it is a child value
-    for(unsigned i = 0; i < count; ++i ) {
-      if( strncmp(t->children[i]->contents, "{", 1) 
-          && strncmp(t->children[i]->contents, "}", 1)
-          && strcmp(t->children[i]->tag, "regex") ){
-        lval_add(v, read_lval(t->children[i], err), err);
-      } 
+    lval* v = lval_qexp(err);
+    if( err->sig ){
+      lval_del(v);
+      return NULL;
     }
 
+    read_children(v, t, err);
+    //just propagate error signal, nothing to clean
+    return v;
   } else if( strstr(t->tag,"sexp") ) {
-    v = lval_sexp(err);
-    unsigned count = t->children_num;
-
-    //if not a bracket, then it is a child value
-    for(unsigned i = 0; i < count; ++i) {
-      if( strncmp(t->children[i]->contents, "(", 1) 
-          && strncmp(t->children[i]->contents, ")", 1)
-          && strcmp(t->children[i]->tag, "regex") ){
-        lval_add(v, read_lval(t->children[i], err), err);
-      }
+    lval* v = lval_sexp(err);
+    if( err->sig ){
+      lval_del(v);
+      return NULL;
     }
 
+    read_children(v, t, err);
+    //just propagate error signal, nothing to clean
+    return v;
   } else if( !strcmp(t->tag,">") ) {
-    v = read_lval(t->children[1], err);
+    return read_lval(t->children[1], err);
   } else {
-    v = lval_undef(err);
+    //this should not happen
+    printf("ERROR unrecognized tag");
+    exit(1);
   }
 
-  //clean and return
-  mpc_ast_delete(t);
-  return v;
+  return NULL;
+}
+
+//======================================
+void read_children(lval* parent, mpc_ast_t* t, err_t* err) {
+  unsigned count = t->children_num;
+  lval* next_child;
+  for(unsigned i = 0; i < count; ++i) {
+    //if not a bracket, then it is a child value
+    if( strcmp(t->children[i]->tag, "regex")
+        && strncmp(t->children[i]->contents, "(", 1) 
+        && strncmp(t->children[i]->contents, ")", 1)
+        && strncmp(t->children[i]->contents, "{", 1) 
+        && strncmp(t->children[i]->contents, "}", 1) ){
+      next_child = read_lval(t->children[i], err);
+      if( err->sig ){
+        lval_del(next_child);
+	return;
+      }
+
+      lval_add(parent, next_child, err);
+      if( err->sig ){ return; }
+    }
+  }
 }
 
 //======================================
@@ -666,7 +684,6 @@ lval* eval_lval(symbol_env* sym_env, lval* v, err_t* err) {
 }
 
 //======================================
-// input: `v` will be freed
 lval* eval_sexp(symbol_env* sym_env, lval* v, err_t* err) {
   //assuming v is not empty;
 
@@ -934,12 +951,11 @@ lval* builtin_op(symbol_env* sym_env, char* op, lval* args, err_t* err) {
 //======================================
 lval* builtin_lambda(lval* args, err_t* err) {
   //TODO preconditions
+  lval* arg_list = lval_pop(args, 0, err);
+  lval* exp = lval_pop(args, 0, err);
+  lval_del(args); //TODO
 
-  lval* arg_list = lval_pop(args,0, err);
-  lval* exp = lval_pop(args,0, err);
-
-  lval* lambda = lval_lambda(arg_list,exp, err);
-  lval_del(args);
+  lval* lambda = lval_lambda(arg_list, exp, err);
   return lambda;
 }
 
@@ -973,6 +989,7 @@ lval* apply_op(char* op, lval* x, lval* y, err_t* err) {
     return lval_err("invalid symbol", err);
   }
 
+  lval_del(y);
   return x;
 }
 
@@ -982,24 +999,25 @@ LVAL UTILS
 ********************************************************************************
 */
 lval* lval_pop(lval* sexp, unsigned index, err_t* err) {
-  //#check for correct bounds
-  /*
-  if( index >= sexp->count ) {
-    return lval_err("out of bounds access");
-  }
-  */
-
   //#special case of a single element
-  /*
-  if( 1 == sexp->count) {
-    lval* r = sexp->cell[0];
+  if( 1 == sexp->count ){
+    lval* r = sexp->cell[index];
+    free(sexp->cell);
     sexp->cell = NULL;
+    sexp->count = 0;
     return r;
   }
-  */
 
   //#general case
-  lval* x = sexp->cell[index];
+  lval* x = lval_copy(sexp->cell[index], err);//this is a dirty hack for now
+  lval_del(sexp->cell[index]);
+  sexp->cell[index] = NULL;
+  if( err->sig ){
+    printf("too lazy to implement this\n");
+    exit(1);
+  }
+  //this workaround will become a non issue when linked lists are used instead of arrays
+  
   //shift
   memmove(&sexp->cell[index],
           &sexp->cell[index+1],
@@ -1313,5 +1331,3 @@ unsigned sym_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
   sym_env->stack[sym_env->count - 1] = sym_map;
   return 0;
 }
-
-
