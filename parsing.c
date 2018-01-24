@@ -43,8 +43,6 @@
 * data structures and algorithms
 --------------------------------------------------------------------------------
 # Further reasearch
-* how does lval_pop work?
- * **why doesn't x get overriden on memmove?**
 */
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,7 +53,6 @@
 /********************************************************************************
 * UTILS
 ********************************************************************************/
-
 int mallocfail = -5000;
 
 #define oldmalloc(x) (malloc(x))
@@ -127,6 +124,10 @@ symbol_env* make_symbol_env(err_t* err) {
 /********************************************************************************
 * PROTOTYPES
 ********************************************************************************/
+
+//main
+char* prompt(void);
+void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err );
 
 //constructors
 lval* lval_num(long x, err_t* err);
@@ -207,7 +208,9 @@ char* strdup(char* input, err_t* err) {
 * MAIN
 ********************************************************************************/
 int main(int argc, char* argv[] ) {
-  //INIT
+  //-----INIT-----
+  
+  //error struct
   err_t* err = malloc(sizeof(err_t));
   if( !err ) {
     printf("1 insufficient mem for baseline framework\n");
@@ -215,6 +218,7 @@ int main(int argc, char* argv[] ) {
   }
   err->sig = OK;
 
+  //symbol env
   symbol_env* sym_env = init_symbol_env(err);
   if( err->sig ){
     free(err);
@@ -223,7 +227,7 @@ int main(int argc, char* argv[] ) {
     exit(1);
   }
 
-  //Parser
+  //parser
   mpc_parser_t* Number = mpc_new("number");
   mpc_parser_t* Symbol = mpc_new("symbol");
   mpc_parser_t* Sexp = mpc_new("sexp");
@@ -242,29 +246,34 @@ int main(int argc, char* argv[] ) {
      "
     ,Number ,Symbol ,Sexp ,Qexp ,Expr ,Lispy);
   
-  //REPL
+  //-----REPL-----
+  repl(Lispy, sym_env, err);
+  
+  //-----CLEAN-----
+  free(err);
+  mpc_cleanup(6, Number, Symbol, Sexp, Qexp, Expr, Lispy);
+  free_symbol_env(sym_env);
+  return 0;
+}
+
+//======================================
+char* prompt(void) {
+  char* input = linenoise("> ");
+  linenoiseHistoryAdd(input);
+  return input;
+}
+
+//======================================
+void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
   puts("Lispy v0.1.0");
-  puts("Enter 'quit' to quit\n");
+  puts("Enter 'QUIT' to quit\n");
 
-  while(1) {
-    //prompt
-    char* input = linenoise("> ");
-    linenoiseHistoryAdd(input);
-
-    //TODO add appropriate flags to linenoise to handle escape sequences
-    //check for escape codes
-    if(strcmp(input,"quit") == 0) {
-      free(input);
-      break;
-    }
-
-    //parsing
-    mpc_result_t r;
-    lval *x, *y;
+  mpc_result_t r;
+  lval *x, *y;
+  char* input = prompt();
+  while( strcmp(input,"QUIT") ){
     if( mpc_parse("<stdin>", input, Lispy, &r)) {
-      //parsed good, then eval
-      //mpc_ast_print(r.output);//DEBUG
-
+      //read
       x = read_lval(r.output, err);
       mpc_ast_delete(r.output);
       if( err->sig ){
@@ -275,6 +284,7 @@ int main(int argc, char* argv[] ) {
 	goto clean_repl;
       }
 
+      //eval
       y = eval_lval(sym_env, x, err);
       if( err->sig ){
 	lval_del(y);
@@ -284,6 +294,7 @@ int main(int argc, char* argv[] ) {
 	goto clean_repl;
       }
 
+      //print
       print_lval(y);
       puts("\n========================================");
       lval_del(y);
@@ -294,14 +305,10 @@ int main(int argc, char* argv[] ) {
     }
 
     clean_repl:
-      free(input);
+    free(input);
+    input = prompt();
   }
-
-  //clean up
-  free(err);//DEBUG [valgrind]
-  mpc_cleanup(6, Number, Symbol, Sexp, Qexp, Expr, Lispy);
-  free_symbol_env(sym_env);
-  return 0;
+  free(input);
 }
 
 /********************************************************************************
