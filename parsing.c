@@ -54,7 +54,6 @@
 * UTILS
 ********************************************************************************/
 int mallocfail = -5000;
-
 #define oldmalloc(x) (malloc(x))
 #define malloc(x) ( (1 == ++mallocfail) ? NULL : oldmalloc(x) )
 
@@ -149,11 +148,13 @@ lval* lval_join(lval* x, lval* y, err_t* err);
 char* lval_type_string(lval* v);
 
 //reader utils
+lval* lisp_read(mpc_ast_t* t, err_t* err);
 lval* read_lval(mpc_ast_t* t, err_t* err);
 void read_children(lval* parent, mpc_ast_t* t, err_t* err);
 lval* read_num(mpc_ast_t* t, err_t* err);
 
 //printer utils
+void print(lval* x);
 void print_lval(lval* x);
 
 //eval utils
@@ -208,9 +209,9 @@ char* strdup(char* input, err_t* err) {
 * MAIN
 ********************************************************************************/
 int main(int argc, char* argv[] ) {
-  //-----INIT-----
+  /*** INIT ***/
   
-  //error struct
+  /* error struct */
   err_t* err = malloc(sizeof(err_t));
   if( !err ) {
     printf("1 insufficient mem for baseline framework\n");
@@ -218,7 +219,7 @@ int main(int argc, char* argv[] ) {
   }
   err->sig = OK;
 
-  //symbol env
+  /* symbol env */
   symbol_env* sym_env = init_symbol_env(err);
   if( err->sig ){
     free(err);
@@ -227,7 +228,7 @@ int main(int argc, char* argv[] ) {
     exit(1);
   }
 
-  //parser
+  /* parser */
   mpc_parser_t* Number = mpc_new("number");
   mpc_parser_t* Symbol = mpc_new("symbol");
   mpc_parser_t* Sexp = mpc_new("sexp");
@@ -246,36 +247,38 @@ int main(int argc, char* argv[] ) {
      "
     ,Number ,Symbol ,Sexp ,Qexp ,Expr ,Lispy);
   
-  //-----REPL-----
+  /*** REPL ***/
   repl(Lispy, sym_env, err);
   
-  //-----CLEAN-----
+  /*** CLEAN ***/
   free(err);
   mpc_cleanup(6, Number, Symbol, Sexp, Qexp, Expr, Lispy);
   free_symbol_env(sym_env);
   return 0;
 }
 
-//======================================
+/*
+*/
 char* prompt(void) {
+  puts("\n+--------------------------------------+");
   char* input = linenoise("> ");
   linenoiseHistoryAdd(input);
   return input;
 }
 
-//======================================
+/*
+*/
 void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
   puts("Lispy v0.1.0");
-  puts("Enter 'QUIT' to quit\n");
+  puts("Enter 'QUIT' to quit");
 
-  mpc_result_t r;
-  lval *x, *y;
-  char* input = prompt();
+  mpc_result_t r; /* holds the ast */
+  lval *x;
+  char* input = prompt(); 
   while( strcmp(input,"QUIT") ){
     if( mpc_parse("<stdin>", input, Lispy, &r)) {
-      //read
-      x = read_lval(r.output, err);
-      mpc_ast_delete(r.output);
+      /* read */
+      x = lisp_read(r.output, err);
       if( err->sig ){
 	lval_del(x);
 	printf("[ERR] Unable to READ lval due to insufficient memory\n");
@@ -284,22 +287,20 @@ void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
 	goto clean_repl;
       }
 
-      //eval
-      y = eval_lval(sym_env, x, err);
+      /* eval */
+      x = eval_lval(sym_env, x, err);
       if( err->sig ){
-	lval_del(y);
+	lval_del(x);
 	printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
 
 	err->sig = OK;
 	goto clean_repl;
       }
 
-      //print
-      print_lval(y);
-      puts("\n========================================");
-      lval_del(y);
+      /* print */
+      print(x);
     } else {
-      //parsed bad
+      /* bad parse */
       mpc_err_print(r.error);
       mpc_err_delete(r.error);
     }
@@ -309,6 +310,13 @@ void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
     input = prompt();
   }
   free(input);
+}
+
+/*
+*/
+void print(lval* x) {
+  print_lval(x);
+  lval_del(x);
 }
 
 /********************************************************************************
@@ -323,11 +331,11 @@ lval* lval_num(long number, err_t* err) {
 
   v->type = LVAL_NUM;
   v->num = number;
-
   return v;
 }
 
-//======================================
+/*
+*/
 lval* lval_err(char* err_msg, err_t* err) {
   lval* v = malloc(sizeof(lval));
   if( !v ){
@@ -337,11 +345,11 @@ lval* lval_err(char* err_msg, err_t* err) {
 
   v->type = LVAL_ERR;
   v->err = strdup(err_msg, err);
-
   return v;
 }
 
-//======================================
+/*
+*/
 lval* lval_sym(char* sym_string, err_t* err) {
   lval* v = malloc(sizeof(lval));
   if( !v ){
@@ -351,7 +359,6 @@ lval* lval_sym(char* sym_string, err_t* err) {
 
   v->type = LVAL_SYM;
   v->sym = strdup(sym_string, err);
-
   return v;
 }
 
@@ -385,9 +392,15 @@ lval* lval_qexp(err_t* err) {
 
 //======================================
 lval* lval_builtin(char* func_key, err_t* err) {
-  lval* x = lval_sym(func_key, err);
-  x->type = LVAL_BUILTIN;
-  return x;
+  lval* v = malloc(sizeof(lval));
+  if( !v ){
+    err->sig = OUT_OF_MEM;
+    return NULL;
+  }
+
+  v->type = LVAL_BUILTIN;
+  v->sym = strdup(func_key, err);
+  return v;
 }
 
 //======================================
@@ -510,40 +523,71 @@ void lval_copy_cell(lval* out, lval* in, err_t* err){
 /********************************************************************************
 * READING
 ********************************************************************************/
-lval* read_lval(mpc_ast_t* t, err_t* err) {
-  if( strstr(t->tag,"number") ) {
-    return read_num(t, err);
-  } else if( strstr(t->tag,"symbol") ) {
-    return lval_sym(t->contents, err);
-  } else if( strstr(t->tag,"qexp") ) {
-    lval* v = lval_qexp(err);
-    if( err->sig ){
-      lval_del(v);
-      return NULL;
-    }
+lval* lisp_read( mpc_ast_t* t, err_t* err ){
+  lval* x = read_lval(t, err);
+  mpc_ast_delete(t);
+  return x;
+}
 
-    read_children(v, t, err);
-    //just propagate error signal, nothing to clean
-    return v;
-  } else if( strstr(t->tag,"sexp") ) {
-    lval* v = lval_sexp(err);
-    if( err->sig ){
-      lval_del(v);
-      return NULL;
-    }
+/*
+*/
+typedef enum ast_tag_t { UNRECOGNIZED_TAG,
+	                 NUMBER_TAG, SYMBOL_TAG, QEXP_TAG, SEXP_TAG, TOPLEVEL_TAG, } ast_tag_t;
+ast_tag_t tag_map( char *tag ) {
+  if( strstr(tag,"number") ) {
+    return NUMBER_TAG;
+  } else if( strstr(tag,"symbol") ) {
+    return SYMBOL_TAG;
+  } else if( strstr(tag,"qexp") ) {
+    return QEXP_TAG;
+  } else if( strstr(tag,"sexp") ) {
+    return SEXP_TAG;
+  } else if( !strcmp(tag,">") ) {
+    return TOPLEVEL_TAG;
+  } 
 
-    read_children(v, t, err);
-    //just propagate error signal, nothing to clean
-    return v;
-  } else if( !strcmp(t->tag,">") ) {
-    return read_lval(t->children[1], err);
-  } else {
-    //this should not happen
-    printf("ERROR unrecognized tag");
-    exit(1);
+  return UNRECOGNIZED_TAG;
+}
+
+/* purpose: dispatch reader function based on ast tag
+*/
+lval* read_lval( mpc_ast_t* t, err_t* err ){
+  lval* v = NULL;
+  ast_tag_t tag = tag_map(t->tag);
+
+  switch( tag ){
+    case NUMBER_TAG:
+      v = read_num(t, err);
+      break;
+    case SYMBOL_TAG:
+      v = lval_sym(t->contents, err);
+      break;
+    case QEXP_TAG:
+      v = lval_qexp(err);
+      if( err->sig ){
+        lval_del(v);
+        return NULL;
+      }
+
+      read_children(v, t, err);
+      break;
+    case SEXP_TAG:
+      v = lval_sexp(err);
+      if( err->sig ){
+        lval_del(v);
+        return NULL;
+      }
+
+      read_children(v, t, err);
+      break;
+    case TOPLEVEL_TAG:
+      v = read_lval(t->children[1], err);
+      break;
+    default:
+      printf("ERROR unrecognized tag");
+      exit(1);
   }
-
-  return NULL;
+  return v;
 }
 
 //======================================
@@ -1068,10 +1112,10 @@ char* lval_type_string(lval* v ) {
 //======================================
 //add all builtin keywords
 
-char* builtin_names[] = { "define", "lambda", 
-	                 "head", "tail", "list", "join",
-                         "+", "-", "*", "/",
-	                 NULL };
+char* builtin_names[] = {"define" ,"lambda" 
+	                ,"head" ,"tail" ,"list" ,"join"
+                        ,"+" ,"-" ,"*" ,"/"
+	                ,NULL };
   
 //======================================
 symbol_env* init_symbol_env(err_t* err) {

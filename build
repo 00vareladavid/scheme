@@ -1,4 +1,4 @@
 #!/bin/sh
 
 nix-shell -p gcc binutils \
-          --command 'gcc -std=c99 -Wall parsing.c linenoise/linenoise.c mpc/mpc.c -lm -o parsing'
+          --command 'gcc -std=c99 -Wall parsing.c linenoise/linenoise.o mpc/mpc.o -lm -o parsing'
