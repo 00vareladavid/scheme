@@ -1,4 +1,9 @@
 #!/bin/sh
 
+copts="-std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow"
+#TODO remove these flags once you finish reimplementing builtin functions"
+passes="-Wno-unused-parameter"
+output="-o parsing"
+
 nix-shell -p gcc binutils \
-          --command 'gcc -std=c99 -Wall parsing.c linenoise/linenoise.o mpc/mpc.o -lm -o parsing'
+          --command "gcc -g ${copts} ${passes} parsing.c linenoise/linenoise.o mpc/mpc.o -lm ${output}"

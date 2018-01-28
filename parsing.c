@@ -26,6 +26,8 @@
 * functions are responsible for their inputs
 * reuse the parts you need and free the parts you dont
 * hide memory management through the use of utility functions
+* make sure you store any relevant values before you delete
+** this will save you from invalid read
 ## Function structure
 * assertions
  * use control flow to prevent superfluous assertions
@@ -44,6 +46,10 @@
 ### Error Types
 * lval -> destroy lval
 * sym_tab?
+## Refactoring
+* first set the type system in a MVP
+ * then flesh out the type system with code
+* remember to balance top-down with bottom-up
 --------------------------------------------------------------------------------
 # After
 * review C build process
@@ -87,17 +93,20 @@ typedef struct err_t {
 //======================================
 typedef struct lval {
   unsigned type;
-  long num;
-  builtin_t builtin_code;
-  char* err;
-  char* sym;
 
-  //lambda
-  struct lval* arg_list;
+  long num; /* num */
+  builtin_t builtin_code; /* builtin */
+  char* err; /* err */
+  char* sym; /* symbol */
+
+  /* lambda */
+  struct lval* arg_list; 
   struct lval* exp;
 
-  unsigned count;
-  struct lval** cell;
+  /* sexp and qexp */
+  struct lval* sibling;
+  struct lval* first_child;
+  struct lval* last_child;
 } lval;
 
 enum { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP, LVAL_SYM, LVAL_BUILTIN, LVAL_LAMBDA, LVAL_UNDEF};
@@ -152,40 +161,35 @@ lval* lval_undef(err_t* err);
 lval* lval_lambda(lval* arg_list, lval* exp, err_t* err);
 
 //lval utils
+lval* lval_rip(lval* parent);
+void lval_push(lval* v, lval* child);
+lval* lval_pop(lval* parent);
+void lval_join(lval* x, lval* y);
+
+//lval del
 void  lval_del(lval* v);
 lval* lval_clean( lval *a, lval *b, lval *c );
-lval* lval_copy(lval* v, err_t* err);
-void lval_copy_cell(lval* out, lval* in, err_t* err);
-void lval_push(lval* v, lval* child, err_t* err);
-lval* lval_pop(lval* sexp, unsigned index, err_t* err);
-lval* lval_take(lval* sexp, unsigned index, err_t* err);
-lval* lval_join(lval* x, lval* y, err_t* err);
-char* lval_type_string(lval* v);
 
-//reader utils
+//lval copy
+lval* lval_copy(lval* v, err_t* err);
+lval* lval_copy_sexp(lval* in, err_t* err);
+
+//lval read
 lval* lisp_read(mpc_ast_t* t, err_t* err);
 lval* read_lval(mpc_ast_t* t, err_t* err);
-void read_children(lval* parent, mpc_ast_t* t, err_t* err);
+lval* read_children(lval* parent, mpc_ast_t* t, err_t* err);
 lval* read_num(mpc_ast_t* t, err_t* err);
 
-//printer utils
+//lval print
 void print(lval* x);
 void print_lval(lval* x);
 
-//eval utils
+//lval eval
 lval* eval_lval(symbol_env*, lval* v, err_t* err);
 lval* eval_sexp(symbol_env*, lval* v, err_t* err);
-lval* apply_op(char* op, lval* x, lval* y, err_t* err);
 lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t* err);
 lval* dispatch_builtin(symbol_env*, lval* func, lval* args, err_t* err);
 lval* dispatch_lambda(symbol_env*, lval* func, lval* args, err_t* err);
-
-//env utils
-symbol_env* init_symbol_env( err_t* );
-builtin_t builtin_fun_map( char *x );
-void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
-unsigned free_symbol_map(symbol_map*);
-unsigned free_symbol_env(symbol_env* sym_env);
 
 //builtin functions
 lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err);
@@ -194,11 +198,18 @@ lval* builtin_lambda(lval* args, err_t* err);
 lval* builtin_head(lval* args, err_t* err);
 lval* builtin_tail(lval* args, err_t* err);
 lval* builtin_list(lval* args);
-lval* builtin_append(lval* args, err_t* err);
-lval* builtin_plus(lval* args, err_t* err);
-lval* builtin_minus(lval* args, err_t* err);
-lval* builtin_mult(lval* args, err_t* err);
-lval* builtin_div(lval* args, err_t* err);
+lval* builtin_join(lval* args, err_t* err);
+lval* builtin_sum(lval* args);
+lval* builtin_minus(lval* args);
+lval* builtin_mult(lval* args);
+lval* builtin_div(lval* args);
+
+//env utils
+symbol_env* init_symbol_env( err_t* );
+builtin_t builtin_fun_map( char *x );
+void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
+unsigned free_symbol_map(symbol_map*);
+void free_symbol_env(symbol_env* sym_env);
 
 //symbol utils
 unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err);
@@ -277,6 +288,10 @@ int main(int argc, char* argv[] ) {
   return 0;
 }
 
+/*******************************************************************************
+* Interactive Prompt
+*******************************************************************************/
+
 /*
 */
 char* prompt(void) {
@@ -290,7 +305,7 @@ char* prompt(void) {
 */
 void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
   puts("Lispy v0.1.0");
-  puts("Enter 'QUIT' to quit");
+  puts("Enter 'EXIT' to exit");
 
   mpc_result_t r; /* holds the ast */
   lval *x;
@@ -300,8 +315,8 @@ void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
       /* read */
       x = lisp_read(r.output, err);
       if( err->sig ){
-	lval_del(x);
 	printf("[ERR] Unable to READ lval due to insufficient memory\n");
+	lval_del(x);
 
 	err->sig = OK;
 	goto clean_repl;
@@ -310,8 +325,8 @@ void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
       /* eval */
       x = eval_lval(sym_env, x, err);
       if( err->sig ){
-	lval_del(x);
 	printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
+	lval_del(x);
 
 	err->sig = OK;
 	goto clean_repl;
@@ -332,15 +347,8 @@ void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
   free(input);
 }
 
-/*
-*/
-void print(lval* x) {
-  print_lval(x);
-  lval_del(x);
-}
-
 /********************************************************************************
-* CONSTRUCTORS/DESTRUCTORS
+* CONSTRUCTORS
 ********************************************************************************/
 lval* lval_num(long number, err_t* err) {
   lval* v = malloc(sizeof(lval));
@@ -370,7 +378,7 @@ lval* lval_err(char* err_msg, err_t* err) {
   return v;
 }
 
-/*
+/* sym_string is only read
 */
 lval* lval_sym(char* sym_string, err_t* err) {
   lval* v = malloc(sizeof(lval));
@@ -395,8 +403,8 @@ lval* lval_sexp(err_t* err) {
   }
 
   v->type  = LVAL_SEXP;
-  v->count = 0;
-  v->cell  = NULL;
+  v->first_child = NULL;
+  v->last_child = NULL;
   return v;
 }
 
@@ -409,13 +417,13 @@ lval* lval_qexp(err_t* err) {
   }
 
   v->type = LVAL_QEXP;
-  v->count = 0;
-  v->cell = NULL;
+  v->first_child = NULL;
+  v->last_child = NULL;
   return v;
 }
 
 //======================================
-lval* lval_builtin(char* func_key, err_t* err) {
+lval* lval_builtin(builtin_t code, err_t* err) {
   lval* v = malloc(sizeof(lval));
   if( !v ){
     err->sig = OUT_OF_MEM;
@@ -423,7 +431,7 @@ lval* lval_builtin(char* func_key, err_t* err) {
   }
 
   v->type = LVAL_BUILTIN;
-  v->builtin_code = builtin_fun_map(func_key);
+  v->builtin_code = code;
   return v;
 }
 
@@ -441,16 +449,71 @@ lval* lval_undef(err_t* err) {
 
 //======================================
 lval* lval_lambda(lval* arg_list, lval* exp, err_t* err) {
-  lval* lambda = malloc(sizeof(lval));
-  if( !lambda ){
+  lval* x = malloc(sizeof(lval));
+  if( !x ){
     err->sig = OUT_OF_MEM;
     return NULL;
   }
 
-  lambda->type = LVAL_LAMBDA;
-  lambda->arg_list = arg_list;
-  lambda->exp = exp;
-  return lambda;
+  x->type = LVAL_LAMBDA;
+  x->arg_list = arg_list;
+  x->exp = exp;
+  return x;
+}
+
+/********************************************************************************
+* LVAL UTILS
+********************************************************************************/
+/* Push
+*/
+void lval_push(lval* v, lval* child) {
+  /* prep */
+  child->sibling = NULL;
+
+  if( v->last_child ){
+    (v->last_child)->sibling = child;
+    v->last_child = child;
+  } else {
+    v->first_child = child;
+    v->last_child = child;
+  }
+}
+
+/*
+*/
+lval* lval_pop(lval* parent) {
+  lval* x = parent->first_child;
+  if( x ){
+    parent->first_child = x->sibling;
+  }
+
+  return x;
+}
+
+/*
+*/
+lval* lval_rip(lval* parent) {
+  lval* x = parent->first_child;
+  if( x ){
+    parent->first_child = x->sibling;
+  }
+
+  lval_del(parent);
+  return x;
+}
+
+/*******************************************************************************
+* DELETE
+*******************************************************************************/
+
+/* delete all children from a sexp/qexp
+*/
+void lval_del_children( lval* parent ){
+  lval *sib;
+  for( lval *a = parent->first_child; a; a = sib ){
+    sib = a->sibling;
+    lval_del(a);
+  }
 }
 
 /* recursively free the memory used by an lval
@@ -471,10 +534,7 @@ void lval_del( lval* v ){
       break;
     case LVAL_QEXP:
     case LVAL_SEXP:
-      for(unsigned i = 0; i < v->count; ++i) {
-        lval_del(v->cell[i]);
-      }
-      free(v->cell);
+      lval_del_children( v );
       break;
     case LVAL_LAMBDA:
       lval_del(v->exp);
@@ -497,83 +557,89 @@ lval* lval_clean( lval *a, lval *b, lval *c ){
   return NULL;
 }
 
-/*
+/*******************************************************************************
+* COPY
+*******************************************************************************/
+
+/* copy child list from src to des
 */
-lval* lval_copy( lval* v, err_t* err ){
-  lval* x = malloc(sizeof(lval));
-  if( !x ){
-    err->sig = OUT_OF_MEM;
-    return NULL;
+lval* lval_copy_qexp(lval* src, err_t* err){
+  lval *dest = lval_qexp(err);
+  if( err->sig ){ return NULL; }
+
+  lval *x, *sib;
+  for( x = src->first_child; x; x = sib ){
+    /* record next sibling for later */
+    sib = x->sibling;
+
+    /* copy + push */
+    x = lval_copy(x, err);
+    if( err->sig ){ return lval_clean(dest, NULL, NULL); }
+    lval_push(dest, x);
   }
 
-  x->type = v->type;
-  switch(x->type) {
-    //do nothing for LVAL_UNDEF
-    case LVAL_UNDEF:
-      break;
-    case LVAL_NUM:
-      x->num = v->num;
-      break;
-    case LVAL_BUILTIN:
-      x->builtin_code = v->builtin_code;
-      break;
-    case LVAL_SYM:
-      x->sym = strdup(v->sym, err);
-      if( err->sig ){ return lval_clean(x,NULL,NULL); }
-      break;
-    case LVAL_QEXP:
-    case LVAL_SEXP:
-      lval_copy_cell(x, v, err); 
-      if( err->sig ){ return lval_clean(x,NULL,NULL); }
-      break;
-    case LVAL_LAMBDA:
-      x->arg_list = lval_copy(v->arg_list, err);
-      if( err->sig ){ return lval_clean(x,NULL,NULL); }
-      x->exp = lval_copy(v->exp, err);
-      if( err->sig ){ return lval_clean(x,NULL,NULL); }
-      break;
-    default:
-      fucked_up("lval_copy", "this type doesn't exist, yo!");
-      break;
+  return dest;
+}
+
+/* copy child list from src to des
+*/
+lval* lval_copy_sexp(lval* src, err_t* err){
+  lval *dest = lval_sexp(err);
+  if( err->sig ){ return NULL; }
+
+  lval *x, *sib;
+  for( x = src->first_child; x; x = sib ){
+    /* record next sibling for later */
+    sib = x->sibling;
+
+    /* copy + push */
+    x = lval_copy(x, err);
+    if( err->sig ){ return lval_clean(dest, NULL, NULL); }
+    lval_push(dest, x);
   }
 
+  return dest;
+}
+
+/* copy a lambda expression
+*/
+lval* copy_lambda(lval* src, err_t* err){
+  lval *a = lval_copy(src->arg_list, err);
+  if( err->sig ){ return NULL; }
+  lval *b = lval_copy(src->exp, err);
+  if( err->sig ){ return lval_clean(a, NULL, NULL); }
+  lval *x = lval_lambda(a,b,err);
+  if( err->sig ){ return lval_clean(a, b, NULL); }
   return x;
 }
 
-//======================================
-void lval_copy_cell(lval* out, lval* in, err_t* err){
-  lval** new_cell = malloc(sizeof(lval*) * in->count);
-  if( new_cell ){
-    out->count = in->count;
-    out->cell = new_cell;
-  } else {
-    err->sig = OUT_OF_MEM;
-    lval_del(out);
-    return;
+/* purpose: dispatch copy function based on lval type
+*/
+lval* lval_copy( lval* v, err_t* err ){
+  switch(v->type) {
+    case LVAL_UNDEF:
+      return lval_undef(err);
+    case LVAL_NUM:
+      return lval_num(v->num, err);
+    case LVAL_BUILTIN:
+      return lval_builtin(v->builtin_code, err);
+    case LVAL_SYM:
+      return lval_sym(v->sym, err);
+    case LVAL_QEXP:
+      return lval_copy_qexp(v, err);
+    case LVAL_SEXP:
+      return lval_copy_sexp(v, err);
+    case LVAL_LAMBDA:
+      return copy_lambda(v, err);
+    default:
+      fucked_up("lval_copy", "this type doesn't exist, yo!");
   }
-
-  for(unsigned i = 0; i < out->count; ++i) {
-    out->cell[i] = lval_copy(in->cell[i], err);
-    if( err->sig ){
-      //zero out rest and quit
-      for(unsigned j = i; j < out->count; ++j) {
-        out->cell[j] = NULL;
-      }
-      return;
-    }
-  }
+  return NULL; /* should not be reached, just to shut up compiler */
 }
 
 /********************************************************************************
 * READING
 ********************************************************************************/
-lval* lisp_read( mpc_ast_t* t, err_t* err ){
-  lval* x = read_lval(t, err);
-  //propagate error
-  mpc_ast_delete(t);
-  return x;
-}
-
 /*
 */
 typedef enum ast_tag_t { UNRECOGNIZED_TAG,
@@ -594,50 +660,10 @@ ast_tag_t tag_map( char *tag ) {
   return UNRECOGNIZED_TAG;
 }
 
-/* purpose: dispatch reader function based on ast tag
+/* If read unsuccessful, will clean up ENTIRE parent tree
+** ast is only read
 */
-lval* read_lval( mpc_ast_t* t, err_t* err ){
-  lval* v = NULL;
-  ast_tag_t tag = tag_map(t->tag);
-
-  switch( tag ){
-    case NUMBER_TAG:
-      v = read_num(t, err); //propogate error
-      break;
-    case SYMBOL_TAG:
-      v = lval_sym(t->contents, err); //propogate error
-      break;
-    case QEXP_TAG:
-      v = lval_qexp(err);
-      if( err->sig ){
-        lval_del(v);
-        return NULL;
-      }
-
-      read_children(v, t, err); //propogate error
-      break;
-    case SEXP_TAG:
-      v = lval_sexp(err);
-      if( err->sig ){
-        lval_del(v);
-        return NULL;
-      }
-
-      read_children(v, t, err); //propogate error
-      break;
-    case TOPLEVEL_TAG:
-      v = read_lval(t->children[1], err); //propogate error
-      break;
-    default:
-      printf("ERROR unrecognized tag");
-      exit(1);
-  }
-  return v;
-}
-
-/*
-*/
-void read_children(lval* parent, mpc_ast_t* t, err_t* err) {
+lval* read_children(lval* parent, mpc_ast_t* t, err_t* err) {
   unsigned count = t->children_num;
   lval* next_child;
   for(unsigned i = 0; i < count; ++i) {
@@ -648,41 +674,80 @@ void read_children(lval* parent, mpc_ast_t* t, err_t* err) {
         && strncmp(t->children[i]->contents, "{", 1) 
         && strncmp(t->children[i]->contents, "}", 1) ){
       next_child = read_lval(t->children[i], err);
-      if( err->sig ){ return; }
+      if( err->sig ){
+        lval_del(parent);
+	return NULL;
+      }
 
-      lval_push(parent, next_child, err);
-      if( err->sig ){ return; }
+      lval_push(parent, next_child);
     }
   }
+
+  return parent;
 }
 
-/* Make space in cell + push
+/*
 */
-void lval_push(lval* v, lval* child, err_t* err) {
-  lval** new_mem = realloc(v->cell, sizeof(lval*) * (v->count + 1) );
-  if( new_mem ) {
-    v->count++;
-    v->cell = new_mem;
-  } else {
-    err->sig = OUT_OF_MEM;
-    lval_del(child);
-    return;
+lval* read_lval_sexp( mpc_ast_t* t, err_t* err ){
+  lval *v = lval_sexp(err);
+  if( err->sig ){
+    lval_del(v);
+    return NULL;
   }
 
-  v->cell[v->count - 1] = child;
+  return read_children(v, t, err);
 }
 
-/* Three posibilities:
- * lval_num 'normal' exp
- * lval_err (semantic error)
- * NULL     (memory error)
+/*
+*/
+lval* read_lval_qexp( mpc_ast_t* t, err_t* err ){
+  lval *v = lval_qexp(err);
+  if( err->sig ){
+    lval_del(v);
+    return NULL;
+  }
+
+  return read_children(v, t, err);
+}
+
+/*
+*/
+lval* lisp_read( mpc_ast_t* t, err_t* err ){
+  lval* x = read_lval(t, err); //propagate error
+  mpc_ast_delete(t); //clean up
+  return x; //propage error
+}
+
+/* purpose: dispatch reader function based on ast tag
+*/
+lval* read_lval( mpc_ast_t* t, err_t* err ){
+  ast_tag_t tag = tag_map(t->tag);
+
+  switch( tag ){
+    case NUMBER_TAG:
+      return read_num(t, err);
+    case SYMBOL_TAG:
+      return lval_sym(t->contents, err);
+    case QEXP_TAG:
+      return read_lval_qexp(t, err);
+    case SEXP_TAG:
+      return read_lval_sexp(t, err);
+    case TOPLEVEL_TAG:
+      return read_lval(t->children[1], err);
+    default:
+      printf("ERROR unrecognized tag");
+      exit(1);
+  }
+}
+
+/* 
 */
 lval* read_num(mpc_ast_t* t, err_t* err) {
   errno = 0;
   long num = strtol(t->contents,NULL,10);
 
   if( errno == ERANGE ) {
-    return lval_err("number out of range", err); /* just propogate error */
+    return lval_err("number out of range", err);
   }
 
   return lval_num(num, err);
@@ -691,7 +756,17 @@ lval* read_num(mpc_ast_t* t, err_t* err) {
 /********************************************************************************
 * PRINT
 ********************************************************************************/
+/*
+*/
+void print( lval* x ){
+  print_lval(x);
+  lval_del(x);
+}
+
+/* purpose: dispatch print based on lval type
+*/
 void print_lval(lval* x) {
+  lval *a;
   switch( x->type ) {
     case LVAL_NUM:
       printf("%ld ", x->num);
@@ -704,15 +779,19 @@ void print_lval(lval* x) {
       break;
     case LVAL_SEXP:
       printf("(");
-      for(unsigned i = 0; i < x->count; ++i ) {
-        print_lval(x->cell[i]);
+      a = x->first_child;
+      while( a ){
+        print_lval(a);
+	a = a->sibling;
       }
       printf(")");
       break;
     case LVAL_QEXP:
       fputs("{",stdout);
-      for(unsigned i = 0; i < x->count; ++i ) {
-        print_lval(x->cell[i]);
+      a = x->first_child;
+      while( a ){
+        print_lval(a);
+	a = a->sibling;
       }
       fputs("} ",stdout);
       break;
@@ -734,27 +813,14 @@ void print_lval(lval* x) {
 /********************************************************************************
 * EVAL
 ********************************************************************************/
-//input will be destroyed
-lval* eval_lval(symbol_env* sym_env, lval* v, err_t* err) {
-  switch( v->type ) {
-    case LVAL_SYM:
-      return eval_symbol(sym_env, v, err); /* propogate error */
-      break;
-    case LVAL_SEXP:
-      return eval_sexp(sym_env, v, err); /* propogate error */
-      break;
-    case LVAL_NUM:
-    case LVAL_UNDEF:
-    case LVAL_QEXP:
-    case LVAL_LAMBDA: /* does this belong here? */
-      return v;
-      break;
-    default:
-      fucked_up("eval_lval", "I don't recognize this type yo");
-      break;
-  }
-
-  return NULL;
+/* Remove and return the LL which represents a sexp from a LVAL_SEXP
+** - should also work for QEXP
+*/
+lval* sexp_extract(lval* parent) {
+  lval* x = parent->first_child;
+  parent->first_child = NULL;
+  parent->last_child = NULL;
+  return x;
 }
 
 /* sym_env is modified
@@ -765,7 +831,7 @@ lval* eval_sexp( symbol_env* sym_env, lval* args, err_t* err ){
   //assuming args is not empty;
 
   /* split args into first_val and input args */
-  lval* first_val = lval_pop(args, 0, err); //TODO error handling
+  lval* first_val = lval_pop(args); //TODO error handling
 
   /* call dispatch function based on function type */
   lval* func = eval_lval(sym_env, first_val, err);
@@ -786,20 +852,59 @@ lval* eval_sexp( symbol_env* sym_env, lval* args, err_t* err ){
   }
 }
 
+/* dipsatch eval function based on lval type
+*/
+lval* eval_lval(symbol_env* sym_env, lval* v, err_t* err) {
+  switch( v->type ) {
+    case LVAL_SYM:
+      return eval_symbol(sym_env, v, err);
+    case LVAL_SEXP:
+      return eval_sexp(sym_env, v, err);
+    case LVAL_NUM:
+    case LVAL_UNDEF:
+    case LVAL_QEXP:
+    case LVAL_LAMBDA: /* does this belong here? */
+      return v;
+    default:
+      fucked_up("eval_lval", "I don't recognize this type yo");
+      break;
+  }
+  return NULL; /* should not be reached, just to shut up compiler */
+}
+
+/*
+*/
+void eval_children(symbol_env* sym_env, lval* parent, err_t* err ){
+  lval *chain = sexp_extract(parent);
+  lval *x;
+  while( chain ){
+    x = chain;
+    chain = x->sibling;
+     
+    x = eval_lval(sym_env, x, err);
+    lval_push(parent, x);
+  }
+}
+
 /*
 */
 lval* dispatch_lambda(symbol_env* sym_env, lval* func, lval* args, err_t* err) {
   /* preconditions */
+  /*
   if( args->count != func->arg_list->count ) {
     lval_clean(func,args,NULL);
-    return lval_err("number of arguments does not match function definition", err); /* PPG ERR */
+    return lval_err("number of arguments does not match function definition", err); // PPG ERR
   } 
+  */
 
   /* eval children */
+  eval_children(sym_env, args, err);
+  /*
   for( unsigned i = 0; i < args->count; ++i ) {
     args->cell[i] = eval_lval(sym_env, args->cell[i], err);
-    if( err->sig ){ return lval_clean(func,args,NULL); } /* PPG ERR */
+    if( err->sig ){ return lval_clean(func,args,NULL); } // PPG ERR
   }
+  */
 
   /* set up env */
   populate_symbol_env(sym_env, func->arg_list, args, err); //arg_list and args destroyed here
@@ -822,7 +927,11 @@ lval* dispatch_lambda(symbol_env* sym_env, lval* func, lval* args, err_t* err) {
   return return_val;
 }
 
-//======================================
+/*******************************************************************************
+* SYMBOL UTILS
+*******************************************************************************/
+/*
+*/
 lval* sym_search(symbol_env* env, char* key) {
   lval* result;
   unsigned index;
@@ -864,41 +973,51 @@ lval* dispatch_builtin(symbol_env* sym_env, lval* func, lval* args, err_t* err) 
   /* not special: eval all children and call function */
 
   //eval children
+  eval_children(sym_env, args, err);
+  /*
   for( unsigned i = 0; i < args->count; ++i ) {
     args->cell[i] = eval_lval(sym_env, args->cell[i], err);
     if( err->sig ){ return lval_clean(args, NULL, NULL); }
   }
+  */
 
   //error handling 
+  /* TODO transistion from cell to LL
   for( unsigned i = 0; i < args->count; ++i ) {
     if(LVAL_ERR == args->cell[i]->type) {
       return lval_take(args, i, err);
     }
   }
+  */
 
   return builtin_op(sym_env, builtin_code, args, err);
 }
 
 //======================================
 lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err) {
+  /* set up pointers */
+  /*
   if( 2 != args->count ) {
-    return lval_err("eval accepts exactly 2 args", err);
+    return lval_err("define accepts exactly 2 args", err);
   }
+  */
+  lval* one = lval_pop(args);
+  lval* x = lval_pop(args);
+  lval_del(args);
 
-  if( LVAL_SYM != args->cell[0]->type ) {
+  /* rip symbol */
+  if( LVAL_SYM != one->type ) {
     return lval_err("eval expects 1st arg to be of type LVAL_SYM", err);
   }
-
-  //set up pointers and free unused memory
-  char* symbol = args->cell[0]->sym;
-  lval* x = args->cell[1];
-  args->cell[0]->sym = NULL;
-  args->cell[1] = NULL;
-  lval_del(args);
+  char* symbol = one->sym;
+  one->sym = NULL;
+  lval_del(one);
   
+  /* eval */
   x = eval_lval(sym_env, x, err);
   if( err->sig ){ return lval_clean(x, NULL, NULL); } /* couldn't eval def target */
 
+  /* push */
   unsigned err_x = symbol_add(sym_env->stack[sym_env->count-1], symbol, x, err);//TODO remove this dirty hack
   if( 1 == err_x ){
     return lval_err("symbol already exists", err);
@@ -924,19 +1043,23 @@ lval* builtin_list(lval* args) {
 //======================================
 lval* builtin_head(lval* args, err_t* err) {
   //check inputs
+  /*
   if( 1 != args->count ) {
     return lval_err("head accepts exactly 1 arg", err);
   }
+  */
 
   //TODO check arg is sexp?
 
-  lval* list = lval_take(args,0, err); //TODO lval_pop
+  lval* list = lval_rip(args);
+  /*
   if( list->count < 1 ) {
     return lval_err("head requires a list of length at least 1", err);
   }
+  */
 
   //by this point: x is qexp of size > 1 
-  lval* head = lval_take(list,0, err); //TODO lval_pop
+  lval* head = lval_rip(list);
 
   //preserve quoting for nested expressions
   if( LVAL_SEXP == head->type ) {
@@ -947,7 +1070,8 @@ lval* builtin_head(lval* args, err_t* err) {
 }
 
 //======================================
-lval* builtin_tail(lval* args, err_t* err) {
+lval* builtin_tail(lval* x, err_t* err) {
+  /*
   //check good state
   if( 1 != args->count ) {
     return lval_err("head accepts exactly 1 arg", err);
@@ -957,49 +1081,53 @@ lval* builtin_tail(lval* args, err_t* err) {
   if( !(arg1->count) ) {
     return lval_err("tail requires a list of length at least 1", err);
   }
+  */
 
-  lval* list = lval_take(args,0, err); //TODO lval_pop
-  lval_del(lval_pop(list,0, err)); //TODO lval_pop
-  return list;
+  x = lval_rip(x); /* rip first arg and free the rest */
+  lval_pop( x ); /* pop and discard the head */
+  return x; /* return the tail */
 }
 
 //======================================
-lval* builtin_append(lval* args, err_t* err) {
-    //get size of next cell
-    //realloc to fit both
-    //memmove next cell
-
-    lval* qexp = lval_pop(args,0, err); //TODO lval_pop
-    lval* next = NULL;
-    while(args->count) {
-      next = lval_pop(args,0, err); //TODO lval_pop
-      qexp = lval_join(qexp,next, err); //TODO ll lval
-    }
-
-    free(args);
-    return qexp;
-}
-
-//======================================
-//TODO use memcpy for efficiency
-lval* lval_join(lval* x, lval* y, err_t* err) {
-  for(unsigned i = 0; i < y->count; ++i) {
-    lval_push(x, y->cell[i], err);
-    if( err->sig ){
-      
-    }
+lval* builtin_join(lval* args, err_t* err) {
+  lval* master = lval_pop(args);
+  //WARNING: what if you have a element which is just the NULL value?
+  // The join could end prematurely and values would be lost
+  //TODO will this be an issue?
+  for( lval *next = lval_pop(args); next; next = lval_pop(args) ){
+    lval_join(master, next);
   }
-  lval_del(y);
-  return x;
+
+  lval_del(args);
+  return master;
+}
+
+/* Transfer children from slave sexp to master sexp
+** note: the child list will be transfered in order
+*/
+void lval_join(lval* master, lval* slave ){
+  /* transfer chain */
+  master->last_child->sibling = slave->first_child;
+  master->last_child = slave->last_child;
+
+  /* disown chain */
+  slave->first_child = NULL;
+  slave->last_child = NULL;
+  
+  /* clean up*/
+  lval_del(slave);
 }
 
 //======================================
 lval* builtin_eval(symbol_env* sym_env, lval* args, err_t* err) {
+    /*
     if( 1 != args->count ) {
       return lval_err("eval accepts exactly 1 arg", err);
     }
+    */
 
-    lval* input = lval_take(args, 0, err);//the rest of ARGS will be freed here
+    lval* input = lval_rip(args);//the rest of ARGS will be freed here
+    // TODO input = lval_pop(args); if( !sexp_empty(args) ){ lval_err(....
     if( LVAL_QEXP != input->type ) {
       return lval_err("eval expected qexp", err);
     }
@@ -1019,19 +1147,19 @@ lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t*
     case BUILTIN_TAIL:
       return builtin_tail(args, err);
     case BUILTIN_JOIN:
-      return builtin_append(args, err);
+      return builtin_join(args, err);
     case BUILTIN_EVAL:
       return builtin_eval(sym_env, args, err);
     case BUILTIN_LAMBDA:
       return builtin_lambda(args, err);
     case BUILTIN_PLUS:
-      return builtin_plus(args, err);
+      return builtin_sum(args);
     case BUILTIN_MINUS:
-      return builtin_minus(args, err);
+      return builtin_minus(args);
     case BUILTIN_MULT:
-      return builtin_mult(args, err);
+      return builtin_mult(args);
     case BUILTIN_DIV:
-      return builtin_div(args, err);
+      return builtin_div(args);
     case BUILTIN_DEFINE: /* do nothing */
       break;
   }
@@ -1042,69 +1170,69 @@ lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t*
 
 /*
 */
-lval* builtin_plus( lval* args, err_t* err ){
-  lval *y;
-  lval *x = lval_pop(args, 0, err);
-  while( args->count ){
-    y = lval_pop(args, 0, err);
+lval* builtin_sum( lval* args ){
+  lval *x = lval_pop(args);
+  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num += y->num;
+
     lval_del(y);
   }
+
   lval_del(args);
   return x;
 }
 
 /*
 */
-lval* builtin_minus( lval* args, err_t* err ){
-  lval *y;
-  lval *x = lval_pop(args, 0, err);
-  while( args->count ){
-    y = lval_pop(args, 0, err);
+lval* builtin_minus( lval* args ){
+  lval* x = lval_pop( args );
+  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num -= y->num;
+
     lval_del(y);
   }
+
   lval_del(args);
   return x;
 }
 
 /*
 */
-lval* builtin_mult( lval* args, err_t* err ){
-  lval *y;
-  lval *x = lval_pop(args, 0, err);
-  while( args->count ){
-    y = lval_pop(args, 0, err);
+lval* builtin_mult( lval* args ){
+  lval* x = lval_pop( args );
+  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num *= y->num;
+
     lval_del(y);
   }
+
   lval_del(args);
   return x;
 }
 
 /*
 */
-lval* builtin_div( lval* args, err_t* err ){
-  lval *y;
-  lval *x = lval_pop(args, 0, err);
-  while( args->count ){
-    y = lval_pop(args, 0, err);
+lval* builtin_div( lval* args ){
+  lval* x = lval_pop( args );
+  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num /= y->num;
+
     lval_del(y);
   }
+
   lval_del(args);
   return x;
 }
 
-//======================================
-lval* builtin_lambda(lval* args, err_t* err) {
-  //TODO preconditions
-  lval* arg_list = lval_pop(args, 0, err); //TODO lval_pop
-  lval* exp = lval_pop(args, 0, err); //TODO lval_pop
+/*
+*/
+lval* builtin_lambda( lval* args, err_t* err ){
+  lval* arg_list = lval_pop(args);
+  lval* exp = lval_pop(args);
+  //TODO again, use lval_empty to check for preconditions
+  // this will also involve making sure arg_list and exp are not NULL
   lval_del(args);
-
-  lval* lambda = lval_lambda(arg_list, exp, err);
-  return lambda;
+  return lval_lambda(arg_list, exp, err);
 }
 
 /* look for symbol, if value found, return a copy
@@ -1120,118 +1248,18 @@ lval* eval_symbol( symbol_env* sym_env, lval* x, err_t* err ){
   return lval_copy(v, err);
 }
 
-//======================================
-lval* apply_op(char* op, lval* x, lval* y, err_t* err) {
-  if(!strcmp(op,"+")) {
-    x->num = x->num + y->num;
-  } else if (!strcmp(op,"-")) {
-    x->num = x->num - y->num;
-  } else if (!strcmp(op,"*")) {
-    x->num = x->num * y->num;
-  } else if (!strcmp(op,"/")) {
-    x->num = x->num / y->num;
-  } else {
-    //TODO this should be an exit condition
-    return lval_err("invalid symbol", err);
-  }
-
-  lval_del(y);
-  return x;
-}
-
 /********************************************************************************
-* LVAL UTILS
-********************************************************************************/
-lval* lval_pop(lval* sexp, unsigned index, err_t* err) {
-  //#special case of a single element
-  if( 1 == sexp->count ){
-    lval* r = sexp->cell[index];
-    free(sexp->cell);
-    sexp->cell = NULL;
-    sexp->count = 0;
-    return r;
-  }
-
-  //#general case
-  lval* x = lval_copy(sexp->cell[index], err);//this is a dirty hack for now
-  lval_del(sexp->cell[index]);
-  sexp->cell[index] = NULL;
-  if( err->sig ){
-    printf("too lazy to implement this\n");
-    exit(1);
-  }
-  //this workaround will become a non issue when linked lists are used instead of arrays
-  
-  //shift
-  memmove(&sexp->cell[index],
-          &sexp->cell[index+1],
-          sizeof(lval*) * (sexp->count - (index + 1)));
-
-  //reflect true size
-  lval** new_cell = realloc(sexp->cell, sizeof(lval*) * (sexp->count - 1));
-  if( new_cell ){
-    sexp->count--;
-    sexp->cell = new_cell;
-  } else {
-    err->sig = OUT_OF_MEM;
-    return 0;
-  }
-
-  return x;
-}
-
-//======================================
-lval* lval_take(lval* sexp, unsigned index, err_t* err) {
-  lval* x = lval_pop(sexp, index, err);
-  lval_del(sexp);
-
-  return x;
-}
-
-//======================================
-char* lval_type_string(lval* v ) {
-  switch(v->type) {
-    case LVAL_NUM:
-      return "num";
-      break;
-    case LVAL_BUILTIN:
-      return "builtin";
-      break;
-    case LVAL_SYM:
-      return "sym";
-      break;
-    case LVAL_ERR:
-      return "err";
-      break;
-    case LVAL_SEXP:
-      return "sexp";
-      break;
-    case LVAL_QEXP:
-      return "qexp";
-      break;
-    case LVAL_UNDEF:
-      return "undef";
-      break;
-    case LVAL_LAMBDA:
-      return "lambda";
-      break;
-    default:
-      fucked_up("lval_type_string", "i dont recognize this type");
-      break;
-  }
-  
-  return "UNKNOWN TYPE";
-}
-
-/*******************************************************************************\
 * SYMBOL UTILS
-\*******************************************************************************/
-//======================================
+********************************************************************************/
+/*
+*/
 char* builtin_names[] = {"define" ,"lambda" ,"eval"
 	                ,"head" ,"tail" ,"list" ,"join"
                         ,"+" ,"-" ,"*" ,"/"
 	                ,NULL };
 
+/* dispatch builtin function based on string
+*/
 builtin_t builtin_fun_map( char *x ){
   if( !strcmp( "define", x ) ){
     return BUILTIN_DEFINE;
@@ -1261,11 +1289,12 @@ builtin_t builtin_fun_map( char *x ){
   return 0;
 }
   
-//======================================
+/*
+*/
 symbol_env* init_symbol_env(err_t* err) {
   symbol_env* sym_env = make_symbol_env(err);
   if( err->sig ){
-    return sym_env;
+    return NULL;
   }
 
   //TODO refactor this into symbol_env_new_layer() and symbol_env_add_symbol()
@@ -1297,7 +1326,7 @@ void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
     return;
   }
 
-  lval* xx = lval_builtin(fun_name, err);
+  lval* xx = lval_builtin(builtin_fun_map(fun_name), err);
   if( err->sig ){
     free(funx);
     lval_del(xx);
@@ -1309,7 +1338,7 @@ void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
 }
 
 //======================================
-unsigned free_symbol_map(symbol_map* sym_map) {
+unsigned free_symbol_map( symbol_map* sym_map ){
   if( !sym_map ){ return 0; }
 
   for(unsigned i = 0; i < sym_map->count; ++i) {
@@ -1324,16 +1353,15 @@ unsigned free_symbol_map(symbol_map* sym_map) {
 }
 
 //======================================
-unsigned free_symbol_env(symbol_env* sym_env) {
-  if( !sym_env ){ return 0; }
+void free_symbol_env(symbol_env* sym_env) {
+  if( !sym_env ){ return; }
 
-  for(unsigned i = 0; i < sym_env->count; ++i) {
+  for( unsigned i = 0; i < sym_env->count; ++i ){
     free_symbol_map(sym_env->stack[i]);
   }
 
   free(sym_env->stack);
   free(sym_env);
-  return 0;
 }
 
 /* consumes: symbol, value
@@ -1415,12 +1443,18 @@ void populate_symbol_env( symbol_env* sym_env, lval* arg_list, lval* args, err_t
   }
 
   /* populate */
-  unsigned count = arg_list->count;
-  for(unsigned i = 0; i < count; ++i) {
-    push_kv(sym_map, arg_list->cell[i]->sym, args->cell[i], err);
-    //cut used pointers
-    arg_list->cell[i]->sym = NULL;
-    args->cell[i] = NULL;
+  for( lval *a = lval_pop(arg_list), *b = lval_pop(args);
+       a;
+       a = lval_pop(arg_list), b = lval_pop(args) ){
+    //make sure b is a valid value
+    
+    push_kv(sym_map, a->sym, b, err);
+    if( err->sig ){ puts("pop sym env"); exit(1); }
+
+    /* clean up */
+    a->sym = NULL;
+    lval_del( a );
+
     if( err->sig ){
       lval_clean( args, arg_list, NULL );
       return;
@@ -1428,9 +1462,7 @@ void populate_symbol_env( symbol_env* sym_env, lval* arg_list, lval* args, err_t
   }
 
   /* clean up */
-  lval_del(arg_list);
-  lval_del(args);
-
+  lval_clean( args, arg_list, NULL );
   /* push */
   symbol_env_push(sym_env,sym_map, err);
 }
@@ -1489,7 +1521,8 @@ unsigned symbol_env_pop(symbol_env* sym_env, err_t* err) {
   return 0;
 }
 
-//======================================
+/*
+*/
 unsigned symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
   //make room
   symbol_map** new_stack = realloc(sym_env->stack, sizeof(symbol_map*) * (sym_env->count + 1));
@@ -1507,3 +1540,57 @@ unsigned symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
   sym_env->stack[sym_env->count - 1] = sym_map;
   return 0;
 }
+
+/******************************************************************************
+* GRAVEYARD
+******************************************************************************/
+void print_chain( lval* chain ){
+  puts("printing chain: ");
+  while( chain ){
+    print_lval(chain);
+    chain = chain->sibling;
+  }
+  puts("chain**");
+}
+
+/*
+lval** get_next(lval* parent) {
+  if( !(parent->first_child) ){
+    return &(parent->first_child);
+  }
+
+  lval* x = parent->first_child;
+  while( x->sibling ){
+    x = x->sibling;
+  }
+
+  return &(x->sibling);
+}
+*/
+
+/*
+char* lval_type_string(lval* v ) {
+  switch(v->type) {
+    case LVAL_NUM:
+      return "num";
+    case LVAL_BUILTIN:
+      return "builtin";
+    case LVAL_SYM:
+      return "sym";
+    case LVAL_ERR:
+      return "err";
+    case LVAL_SEXP:
+      return "sexp";
+    case LVAL_QEXP:
+      return "qexp";
+    case LVAL_UNDEF:
+      return "undef";
+    case LVAL_LAMBDA:
+      return "lambda";
+    default:
+      fucked_up("lval_type_string", "i dont recognize this type");
+  }
+  
+  return "UNKNOWN TYPE";
+}
+*/
