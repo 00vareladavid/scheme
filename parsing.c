@@ -58,8 +58,10 @@
 # Further reasearch
 */
 #include <stdio.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include "linenoise/linenoise.h"
 #include "mpc/mpc.h"
 
@@ -70,9 +72,38 @@ int mallocfail = -5000;
 #define oldmalloc(x) (malloc(x))
 #define malloc(x) ( (1 == ++mallocfail) ? NULL : oldmalloc(x) )
 
+/*
+*/
 void fucked_up(char* function_name, char* err_msg) {
   fprintf(stderr, "[ERROR] %s: %s\n", function_name, err_msg);
   exit(1);
+}
+
+/* TODO verify the correctness of this function
+** TODO replace calloc with this malloc wraper
+** TODO learn more about valgrind
+*/
+void* x_malloc( size_t num, size_t size ){
+  if( !size || !num ){
+    return malloc(0);
+  }
+
+  size_t total = num * size;
+  if( total < num ){
+    fucked_up("malloc","integer oveflow");
+  }
+
+  return malloc(total);
+}
+
+size_t inc_size( size_t x ){
+  x += 1u;
+
+  if( !x ){
+    fucked_up("inc_size", "unsigned carry(overflow)");
+  }
+
+  return x;
 }
 
 /********************************************************************************
@@ -90,11 +121,18 @@ typedef struct err_t {
   err_sig_t sig;
 } err_t;
 
-//======================================
-typedef struct lval {
-  unsigned type;
+/*
+*/
+typedef enum lval_type_t { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP,
+	                   LVAL_SYM, LVAL_BUILTIN, LVAL_LAMBDA, LVAL_UNDEF,
+                         } lval_type_t;
 
-  long num; /* num */
+/*
+*/
+typedef struct lval {
+  lval_type_t type;
+
+  int64_t num; /* num */
   builtin_t builtin_code; /* builtin */
   char* err; /* err */
   char* sym; /* symbol */
@@ -109,25 +147,29 @@ typedef struct lval {
   struct lval* last_child;
 } lval;
 
-enum { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP, LVAL_SYM, LVAL_BUILTIN, LVAL_LAMBDA, LVAL_UNDEF};
+/*
 enum { LERR_DIV_ZERO, LERR_BAD_OP, LERR_BAD_NUM };
+*/
 
-//======================================
+/*
+*/
 typedef struct keyval {
   char* key;
   lval* value;
 } keyval;
 
-//======================================
+/*
+*/
 typedef struct symbol_map {
   keyval** mem;
-  unsigned count;
+  size_t count;
 } symbol_map;
 
-//======================================
+/*
+*/
 typedef struct symbol_env {
   symbol_map** stack;
-  unsigned count;
+  size_t count;
 } symbol_env;
 
 //======================================
@@ -152,7 +194,7 @@ char* prompt(void);
 void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err );
 
 //constructors
-lval* lval_num(long x, err_t* err);
+lval* lval_num(int64_t x, err_t* err);
 lval* lval_err(char* err_msg, err_t* err);
 lval* lval_sym(char* sym_string, err_t* err);
 lval* lval_sexp(err_t* err);
@@ -208,25 +250,25 @@ lval* builtin_div(lval* args);
 symbol_env* init_symbol_env( err_t* );
 builtin_t builtin_fun_map( char *x );
 void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
-unsigned free_symbol_map(symbol_map*);
+void free_symbol_map(symbol_map*);
 void free_symbol_env(symbol_env* sym_env);
 
 //symbol utils
-unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err);
+bool symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err);
 lval* eval_symbol( symbol_env* sym_env, lval* x, err_t* err );
 lval* sym_map_search(symbol_map* sym_map, char* key);
 lval* sym_search(symbol_env* env, char* key);
 void push_kv(symbol_map* sym_map, char* key, lval* value, err_t* err);
 void populate_symbol_env(symbol_env* sym_env, lval* arg_list, lval* args, err_t* err);
 symbol_map* make_symbol_map(err_t* err);
-unsigned symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err);
-unsigned symbol_env_pop(symbol_env*, err_t* err);
+void symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err);
+void symbol_env_pop(symbol_env*, err_t* err);
 
 /********************************************************************************
 * SHOULD BE IN string.h
 ********************************************************************************/
 char* strdup(char* input, err_t* err) {
-  char* x = malloc(sizeof(char) * (strlen(input) + 1));
+  char* x = calloc( inc_size(strlen(input)), sizeof(char) );
   if( !x ){
     err->sig = OUT_OF_MEM;
     return NULL;
@@ -350,7 +392,7 @@ void repl( mpc_parser_t* Lispy, symbol_env* sym_env, err_t* err ){
 /********************************************************************************
 * CONSTRUCTORS
 ********************************************************************************/
-lval* lval_num(long number, err_t* err) {
+lval* lval_num(int64_t number, err_t* err) {
   lval* v = malloc(sizeof(lval));
   if( !v ){
     err->sig = OUT_OF_MEM;
@@ -664,9 +706,9 @@ ast_tag_t tag_map( char *tag ) {
 ** ast is only read
 */
 lval* read_children(lval* parent, mpc_ast_t* t, err_t* err) {
-  unsigned count = t->children_num;
+  uint32_t count = t->children_num;
   lval* next_child;
-  for(unsigned i = 0; i < count; ++i) {
+  for( size_t i = 0; i < count; i=inc_size(i) ){
     //if not a bracket, then it is a child value
     if( strcmp(t->children[i]->tag, "regex")
         && strncmp(t->children[i]->contents, "(", 1) 
@@ -744,8 +786,7 @@ lval* read_lval( mpc_ast_t* t, err_t* err ){
 */
 lval* read_num(mpc_ast_t* t, err_t* err) {
   errno = 0;
-  long num = strtol(t->contents,NULL,10);
-
+  int64_t num = strtol(t->contents,NULL,10);
   if( errno == ERANGE ) {
     return lval_err("number out of range", err);
   }
@@ -934,9 +975,9 @@ lval* dispatch_lambda(symbol_env* sym_env, lval* func, lval* args, err_t* err) {
 */
 lval* sym_search(symbol_env* env, char* key) {
   lval* result;
-  unsigned index;
+  size_t index;
   symbol_map* next_map;
-  for(unsigned i = 0; i < env->count; ++i) {
+  for( size_t i = 0; i < env->count; i=inc_size(i) ){
     index = env->count - 1 - i;
     next_map = env->stack[index];
     result = sym_map_search(next_map, key);
@@ -951,7 +992,7 @@ lval* sym_search(symbol_env* env, char* key) {
 //======================================
 //TODO what if something becomes deallocated?
 lval* sym_map_search(symbol_map* sym_map, char* key) {
-  for(unsigned i = 0; i < sym_map->count; ++i) {
+  for( size_t i = 0; i < sym_map->count; i=inc_size(i) ){
     if( !strcmp(sym_map->mem[i]->key, key) ){
       return sym_map->mem[i]->value;
     }
@@ -1018,8 +1059,8 @@ lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err) {
   if( err->sig ){ return lval_clean(x, NULL, NULL); } /* couldn't eval def target */
 
   /* push */
-  unsigned err_x = symbol_add(sym_env->stack[sym_env->count-1], symbol, x, err);//TODO remove this dirty hack
-  if( 1 == err_x ){
+  bool err_x = symbol_add(sym_env->stack[sym_env->count-1], symbol, x, err);//TODO remove this dirty hack
+  if( err_x ){
     return lval_err("symbol already exists", err);
   }
   if( err->sig ){ /* werent able to make space in the sym_map on top of sym_env */
@@ -1168,7 +1209,7 @@ lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t*
   exit(1);
 }
 
-/*
+/* Note checking for overflow should be the job of LISP not here at a low level
 */
 lval* builtin_sum( lval* args ){
   lval *x = lval_pop(args);
@@ -1305,7 +1346,7 @@ symbol_env* init_symbol_env(err_t* err) {
   }
 
   char* x;
-  for(unsigned i = 0; (x = builtin_names[i]); ++i) {
+  for( size_t i = 0; (x = builtin_names[i]); i=inc_size(i) ){
     push_builtin(sym_map, x, err);
     if( err->sig ){
       free_symbol_map(sym_map);
@@ -1338,10 +1379,10 @@ void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
 }
 
 //======================================
-unsigned free_symbol_map( symbol_map* sym_map ){
-  if( !sym_map ){ return 0; }
+void free_symbol_map( symbol_map* sym_map ){
+  if( !sym_map ){ return; }
 
-  for(unsigned i = 0; i < sym_map->count; ++i) {
+  for( size_t i = 0; i < sym_map->count; i=inc_size(i) ){
     free(sym_map->mem[i]->key);
     lval_del(sym_map->mem[i]->value);
     free(sym_map->mem[i]);
@@ -1349,14 +1390,14 @@ unsigned free_symbol_map( symbol_map* sym_map ){
 
   free(sym_map->mem);
   free(sym_map);
-  return 0;
+  return;
 }
 
 //======================================
 void free_symbol_env(symbol_env* sym_env) {
   if( !sym_env ){ return; }
 
-  for( unsigned i = 0; i < sym_env->count; ++i ){
+  for( size_t i = 0; i < sym_env->count; i=inc_size(i) ){
     free_symbol_map(sym_env->stack[i]);
   }
 
@@ -1366,10 +1407,10 @@ void free_symbol_env(symbol_env* sym_env) {
 
 /* consumes: symbol, value
 */
-unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) {
+bool symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) {
   //make sure there is something in the symbol_map before you being searching
   if( sym_map && sym_map_search(sym_map, symbol) ) {
-    return 1;
+    return true;
   }
 
   keyval** new_mem = realloc(sym_map->mem, sizeof(keyval*) * (sym_map->count + 1));
@@ -1382,7 +1423,7 @@ unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) 
     err->sig = OUT_OF_MEM;
     free(symbol);
     lval_del(value);
-    return 0;
+    return false;
   }
 
   keyval* new_kv = malloc(sizeof(keyval));
@@ -1392,12 +1433,12 @@ unsigned symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) 
     err->sig = OUT_OF_MEM;
     free(symbol);
     lval_del(value);
-    return 0;  
+    return false;  
   }
 
   sym_map->mem[sym_map->count - 1]->key = symbol;
   sym_map->mem[sym_map->count - 1]->value = value;
-  return 0;
+  return false;
 }
 
 //======================================
@@ -1505,7 +1546,7 @@ void push_kv(symbol_map* sym_map, char* key, lval* value, err_t* err) {
 
 /*
 */
-unsigned symbol_env_pop(symbol_env* sym_env, err_t* err) {
+void symbol_env_pop(symbol_env* sym_env, err_t* err) {
   free_symbol_map(sym_env->stack[sym_env->count - 1]);
   sym_env->stack[sym_env->count - 1] = NULL;
 
@@ -1515,16 +1556,14 @@ unsigned symbol_env_pop(symbol_env* sym_env, err_t* err) {
     sym_env->stack = new_stack;
   } else {
     err->sig = OUT_OF_MEM;
-    return 0;
+    return;
   }
-
-  return 0;
 }
 
 /*
 */
-unsigned symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
-  //make room
+void symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
+  /* make room */
   symbol_map** new_stack = realloc(sym_env->stack, sizeof(symbol_map*) * (sym_env->count + 1));
   if( new_stack ){
     sym_env->count++;
@@ -1533,12 +1572,11 @@ unsigned symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err) {
   } else {
     err->sig = OUT_OF_MEM;
     free_symbol_map(sym_map);
-    return 0;
+    return;
   }
 
-  //push
+  /* push */
   sym_env->stack[sym_env->count - 1] = sym_map;
-  return 0;
 }
 
 /******************************************************************************
