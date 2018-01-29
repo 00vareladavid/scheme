@@ -109,10 +109,13 @@ size_t inc_size( size_t x ){
 /********************************************************************************
 * TYPES
 ********************************************************************************/
-typedef enum builtin_t { BUILTIN_DEFINE, BUILTIN_LAMBDA, BUILTIN_EVAL,
-	                 BUILTIN_HEAD, BUILTIN_TAIL, BUILTIN_LIST, BUILTIN_JOIN,
-			 BUILTIN_PLUS, BUILTIN_MINUS, BUILTIN_MULT, BUILTIN_DIV,
-                       } builtin_t;
+/* note a
+*/
+typedef enum builtin_t {NOT_A_BUILTIN,
+	                BUILTIN_DEFINE, BUILTIN_LAMBDA, BUILTIN_EVAL,
+	                BUILTIN_HEAD, BUILTIN_TAIL, BUILTIN_LIST, BUILTIN_JOIN,
+			BUILTIN_PLUS, BUILTIN_MINUS, BUILTIN_MULT, BUILTIN_DIV,
+                       }builtin_t;
 
 /*
 */
@@ -124,7 +127,7 @@ typedef struct err_t {
 /*
 */
 typedef enum lval_type_t { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP,
-	                   LVAL_SYM, LVAL_BUILTIN, LVAL_LAMBDA, LVAL_UNDEF,
+	                   LVAL_SYM, LVAL_FUN, LVAL_UNDEF,
                          } lval_type_t;
 
 /*
@@ -133,11 +136,14 @@ typedef struct lval {
   lval_type_t type;
 
   int64_t num; /* num */
-  builtin_t builtin_code; /* builtin */
   char* err; /* err */
   char* sym; /* symbol */
 
-  /* lambda */
+  /* functions */
+
+  /* - builtin */
+  builtin_t builtin_code;
+  /* - lambda */
   struct lval* arg_list; 
   struct lval* exp;
 
@@ -472,7 +478,7 @@ lval* lval_builtin(builtin_t code, err_t* err) {
     return NULL;
   }
 
-  v->type = LVAL_BUILTIN;
+  v->type = LVAL_FUN;
   v->builtin_code = code;
   return v;
 }
@@ -497,7 +503,8 @@ lval* lval_lambda(lval* arg_list, lval* exp, err_t* err) {
     return NULL;
   }
 
-  x->type = LVAL_LAMBDA;
+  x->type = LVAL_FUN;
+  x->builtin_code = NOT_A_BUILTIN;
   x->arg_list = arg_list;
   x->exp = exp;
   return x;
@@ -558,15 +565,26 @@ void lval_del_children( lval* parent ){
   }
 }
 
+/* WARNING: this does not delete the struct itself, only the approriate elements
+*/
+void lval_del_func( lval *v ){
+  /* if a lambda expression */
+  if( !(v->builtin_code) ){
+    lval_del(v->exp);
+    lval_del(v->arg_list);
+  }
+
+  /* nothing to delete for builtin functions */
+}
+
 /* recursively free the memory used by an lval
 */
-void lval_del( lval* v ){
+void lval_del( lval *v ){
   if( !v ){ return; }
 
   switch( v->type ){
     case LVAL_NUM:
     case LVAL_UNDEF:
-    case LVAL_BUILTIN:
       break; /* do nothing */
     case LVAL_ERR:
       free(v->err);
@@ -578,9 +596,8 @@ void lval_del( lval* v ){
     case LVAL_SEXP:
       lval_del_children( v );
       break;
-    case LVAL_LAMBDA:
-      lval_del(v->exp);
-      lval_del(v->arg_list);
+    case LVAL_FUN:
+      lval_del_func(v);
       break;
     default:
       fucked_up("lval_del","I dont recognize this type yo");
@@ -655,24 +672,32 @@ lval* copy_lambda(lval* src, err_t* err){
   return x;
 }
 
+/*
+*/
+lval* lval_copy_func( lval *v, err_t *err ){
+  if( v->builtin_code ){
+    return lval_builtin(v->builtin_code, err);
+  }
+
+  return copy_lambda(v, err);
+}
+
 /* purpose: dispatch copy function based on lval type
 */
-lval* lval_copy( lval* v, err_t* err ){
+lval* lval_copy( lval *v, err_t *err ){
   switch(v->type) {
     case LVAL_UNDEF:
       return lval_undef(err);
     case LVAL_NUM:
       return lval_num(v->num, err);
-    case LVAL_BUILTIN:
-      return lval_builtin(v->builtin_code, err);
+    case LVAL_FUN:
+      return lval_copy_func(v, err);
     case LVAL_SYM:
       return lval_sym(v->sym, err);
     case LVAL_QEXP:
       return lval_copy_qexp(v, err);
     case LVAL_SEXP:
       return lval_copy_sexp(v, err);
-    case LVAL_LAMBDA:
-      return copy_lambda(v, err);
     default:
       fucked_up("lval_copy", "this type doesn't exist, yo!");
   }
@@ -804,6 +829,19 @@ void print( lval* x ){
   lval_del(x);
 }
 
+/*
+*/
+void print_lval_func( lval *x ){
+  if( x->builtin_code ){
+    printf("<builtin [%u]> ", x->builtin_code);
+  } else {
+    printf("<lambda ");
+    print_lval(x->arg_list);
+    print_lval(x->exp);
+    printf("> ");
+  }
+}
+
 /* purpose: dispatch print based on lval type
 */
 void print_lval(lval* x) {
@@ -839,11 +877,8 @@ void print_lval(lval* x) {
     case LVAL_UNDEF:
       printf("<undef> ");
       break;
-    case LVAL_LAMBDA:
-      printf("<lambda ");
-      print_lval(x->arg_list);
-      print_lval(x->exp);
-      printf("> ");
+    case LVAL_FUN:
+      print_lval_func(x);
       break;
     default:
       fucked_up("print_lval","this type can't be printed, yo!");
@@ -878,24 +913,23 @@ lval* eval_sexp( symbol_env* sym_env, lval* args, err_t* err ){
   lval* func = eval_lval(sym_env, first_val, err);
   if( err->sig ){ return lval_clean(func, args, NULL); }
 
-  switch( func->type ){
-    case LVAL_BUILTIN:
-      return dispatch_builtin(sym_env, func, args, err); /* propagate error */
-      break;
-    case LVAL_LAMBDA:
-      return dispatch_lambda(sym_env, func, args, err); /* propagte error */
-      break;
-    default:
-      lval_del(func);
-      lval_del(args);
-      return lval_err("1st element of sexp list is not a func", err); /* propagate error */
-      break;
+  /* make sure first arg is a func */
+  if( LVAL_FUN != func->type ){
+    lval_del(func);
+    lval_del(args);
+    return lval_err("1st element of sexp list is not a func", err); /* propagate error */
   }
+
+  /* dispatch */
+  if( func->builtin_code ){
+    return dispatch_builtin(sym_env, func, args, err);
+  }
+  return dispatch_lambda(sym_env, func, args, err);
 }
 
 /* dipsatch eval function based on lval type
 */
-lval* eval_lval(symbol_env* sym_env, lval* v, err_t* err) {
+lval* eval_lval( symbol_env* sym_env, lval* v, err_t* err ){
   switch( v->type ) {
     case LVAL_SYM:
       return eval_symbol(sym_env, v, err);
@@ -904,7 +938,7 @@ lval* eval_lval(symbol_env* sym_env, lval* v, err_t* err) {
     case LVAL_NUM:
     case LVAL_UNDEF:
     case LVAL_QEXP:
-    case LVAL_LAMBDA: /* does this belong here? */
+    case LVAL_FUN: /* does this belong here? */
       return v;
     default:
       fucked_up("eval_lval", "I don't recognize this type yo");
@@ -1202,11 +1236,13 @@ lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t*
     case BUILTIN_DIV:
       return builtin_div(args);
     case BUILTIN_DEFINE: /* do nothing */
-      break;
+      fucked_up("builtin_op","I was passed a DEFINE builtin. This should not happen");
+    case NOT_A_BUILTIN:
+      fucked_up("builtin_op","I was passed a lambda function. This should not happen");
   }
 
-  puts("[ERR] Unrecognized builtin operator");
-  exit(1);
+  fucked_up("builtin_op","unrecognized builtin operator");
+  return NULL; /* just so the compiler wont complain */
 }
 
 /* Note checking for overflow should be the job of LISP not here at a low level
