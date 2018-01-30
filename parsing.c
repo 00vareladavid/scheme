@@ -130,6 +130,13 @@ typedef enum lval_type_t { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP,
 	                   LVAL_SYM, LVAL_FUN, LVAL_UNDEF,
                          } lval_type_t;
 
+struct lval; //TODO learn about forward declarations
+typedef struct lval lval;
+struct symbol_env;
+typedef struct symbol_env symbol_env;
+
+typedef lval* (builtin_fun)(symbol_env*, lval*, err_t* );
+
 /*
 */
 typedef struct lval {
@@ -142,15 +149,15 @@ typedef struct lval {
   /* functions */
 
   /* - builtin */
-  builtin_t builtin_code;
+  builtin_fun *builtin;
   /* - lambda */
-  struct lval* arg_list; 
-  struct lval* exp;
+  lval* parameters; 
+  lval* exp;
 
   /* sexp and qexp */
-  struct lval* sibling;
-  struct lval* first_child;
-  struct lval* last_child;
+  lval* sibling;
+  lval* first_child;
+  lval* last_child;
 } lval;
 
 /*
@@ -194,6 +201,8 @@ symbol_env* make_symbol_env(err_t* err) {
 /********************************************************************************
 * PROTOTYPES
 ********************************************************************************/
+//debugging
+char* lval_type_string(lval* v );
 
 //main
 char* prompt(void);
@@ -206,7 +215,7 @@ lval* lval_sym(char* sym_string, err_t* err);
 lval* lval_sexp(err_t* err);
 lval* lval_qexp(err_t* err);
 lval* lval_undef(err_t* err);
-lval* lval_lambda(lval* arg_list, lval* exp, err_t* err);
+lval* lval_lambda(lval* parameters, lval* exp, err_t* err);
 
 //lval utils
 lval* lval_rip(lval* parent);
@@ -239,22 +248,28 @@ lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t*
 lval* dispatch_builtin(symbol_env*, lval* func, lval* args, err_t* err);
 lval* dispatch_lambda(symbol_env*, lval* func, lval* args, err_t* err);
 
-//builtin functions
+/* BUILTINS */
+
+/* most complex builtins, require all three args */
 lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err);
 lval* builtin_eval(symbol_env* sym_env, lval* args, err_t* err);
-lval* builtin_lambda(lval* args, err_t* err);
-lval* builtin_head(lval* args, err_t* err);
-lval* builtin_tail(lval* args, err_t* err);
-lval* builtin_list(lval* args);
-lval* builtin_join(lval* args, err_t* err);
-lval* builtin_sum(lval* args);
-lval* builtin_minus(lval* args);
-lval* builtin_mult(lval* args);
-lval* builtin_div(lval* args);
+
+/* these builtins operate directly on their args, no sym_env needed */
+lval* builtin_lambda(symbol_env* sym_env, lval* args, err_t* err);
+lval* builtin_head(symbol_env *sym_env, lval *args, err_t *err );
+lval* builtin_tail(symbol_env *sym_env, lval *args, err_t *err );
+lval* builtin_join(symbol_env *sym_env, lval *args, err_t *err );
+
+/* safe builtins, no chance of memory errors */
+lval* builtin_list(symbol_env *sym_env, lval *args, err_t *err );
+lval* builtin_sum(symbol_env *sym_env, lval *args, err_t *err );
+lval* builtin_minus(symbol_env *sym_env, lval *args, err_t *err );
+lval* builtin_mult(symbol_env *sym_env, lval *args, err_t *err );
+lval* builtin_div(symbol_env *sym_env, lval *args, err_t *err );
 
 //env utils
 symbol_env* init_symbol_env( err_t* );
-builtin_t builtin_fun_map( char *x );
+builtin_fun* builtin_fun_map( char *x );
 void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
 void free_symbol_map(symbol_map*);
 void free_symbol_env(symbol_env* sym_env);
@@ -265,7 +280,7 @@ lval* eval_symbol( symbol_env* sym_env, lval* x, err_t* err );
 lval* sym_map_search(symbol_map* sym_map, char* key);
 lval* sym_search(symbol_env* env, char* key);
 void push_kv(symbol_map* sym_map, char* key, lval* value, err_t* err);
-void populate_symbol_env(symbol_env* sym_env, lval* arg_list, lval* args, err_t* err);
+void populate_symbol_env(symbol_env* sym_env, lval* parameters, lval* args, err_t* err);
 symbol_map* make_symbol_map(err_t* err);
 void symbol_env_push(symbol_env* sym_env, symbol_map* sym_map, err_t* err);
 void symbol_env_pop(symbol_env*, err_t* err);
@@ -471,7 +486,7 @@ lval* lval_qexp(err_t* err) {
 }
 
 //======================================
-lval* lval_builtin(builtin_t code, err_t* err) {
+lval* lval_builtin(builtin_fun *fun, err_t* err) {
   lval* v = malloc(sizeof(lval));
   if( !v ){
     err->sig = OUT_OF_MEM;
@@ -479,7 +494,7 @@ lval* lval_builtin(builtin_t code, err_t* err) {
   }
 
   v->type = LVAL_FUN;
-  v->builtin_code = code;
+  v->builtin = fun;
   return v;
 }
 
@@ -496,7 +511,7 @@ lval* lval_undef(err_t* err) {
 }
 
 //======================================
-lval* lval_lambda(lval* arg_list, lval* exp, err_t* err) {
+lval* lval_lambda(lval* parameters, lval* exp, err_t* err) {
   lval* x = malloc(sizeof(lval));
   if( !x ){
     err->sig = OUT_OF_MEM;
@@ -504,8 +519,8 @@ lval* lval_lambda(lval* arg_list, lval* exp, err_t* err) {
   }
 
   x->type = LVAL_FUN;
-  x->builtin_code = NOT_A_BUILTIN;
-  x->arg_list = arg_list;
+  x->builtin = NULL;
+  x->parameters = parameters;
   x->exp = exp;
   return x;
 }
@@ -542,11 +557,7 @@ lval* lval_pop(lval* parent) {
 /*
 */
 lval* lval_rip(lval* parent) {
-  lval* x = parent->first_child;
-  if( x ){
-    parent->first_child = x->sibling;
-  }
-
+  lval* x = lval_pop( parent );
   lval_del(parent);
   return x;
 }
@@ -569,9 +580,9 @@ void lval_del_children( lval* parent ){
 */
 void lval_del_func( lval *v ){
   /* if a lambda expression */
-  if( !(v->builtin_code) ){
+  if( !(v->builtin) ){
     lval_del(v->exp);
-    lval_del(v->arg_list);
+    lval_del(v->parameters);
   }
 
   /* nothing to delete for builtin functions */
@@ -663,7 +674,7 @@ lval* lval_copy_sexp(lval* src, err_t* err){
 /* copy a lambda expression
 */
 lval* copy_lambda(lval* src, err_t* err){
-  lval *a = lval_copy(src->arg_list, err);
+  lval *a = lval_copy(src->parameters, err);
   if( err->sig ){ return NULL; }
   lval *b = lval_copy(src->exp, err);
   if( err->sig ){ return lval_clean(a, NULL, NULL); }
@@ -675,8 +686,8 @@ lval* copy_lambda(lval* src, err_t* err){
 /*
 */
 lval* lval_copy_func( lval *v, err_t *err ){
-  if( v->builtin_code ){
-    return lval_builtin(v->builtin_code, err);
+  if( v->builtin ){
+    return lval_builtin(v->builtin, err);
   }
 
   return copy_lambda(v, err);
@@ -832,11 +843,11 @@ void print( lval* x ){
 /*
 */
 void print_lval_func( lval *x ){
-  if( x->builtin_code ){
-    printf("<builtin [%u]> ", x->builtin_code);
+  if( x->builtin ){
+    printf("<builtin> ");
   } else {
     printf("<lambda ");
-    print_lval(x->arg_list);
+    print_lval(x->parameters);
     print_lval(x->exp);
     printf("> ");
   }
@@ -899,20 +910,28 @@ lval* sexp_extract(lval* parent) {
   return x;
 }
 
+/*
+*/
+void eval_children(symbol_env* sym_env, lval* parent, err_t* err ){
+  lval *chain = sexp_extract(parent);
+  lval *x;
+  while( chain ){
+    x = chain;
+    chain = x->sibling;
+     
+    x = eval_lval(sym_env, x, err);
+    lval_push(parent, x);
+  }
+}
+
 /* sym_env is modified
 ** v is consumed
 ** err is modified
 */
 lval* eval_sexp( symbol_env* sym_env, lval* args, err_t* err ){
-  //assuming args is not empty;
-
-  /* split args into first_val and input args */
-  lval* first_val = lval_pop(args); //TODO error handling
-
-  /* call dispatch function based on function type */
-  lval* func = eval_lval(sym_env, first_val, err);
-  if( err->sig ){ return lval_clean(func, args, NULL); }
-
+  eval_children(sym_env, args, err);
+  lval* func = lval_pop(args);
+  
   /* make sure first arg is a func */
   if( LVAL_FUN != func->type ){
     lval_del(func);
@@ -921,9 +940,12 @@ lval* eval_sexp( symbol_env* sym_env, lval* args, err_t* err ){
   }
 
   /* dispatch */
-  if( func->builtin_code ){
-    return dispatch_builtin(sym_env, func, args, err);
+  if( func->builtin ){
+    lval *x = func->builtin(sym_env, args, err);
+    lval_del(func);
+    return x;
   }
+
   return dispatch_lambda(sym_env, func, args, err);
 }
 
@@ -949,42 +971,11 @@ lval* eval_lval( symbol_env* sym_env, lval* v, err_t* err ){
 
 /*
 */
-void eval_children(symbol_env* sym_env, lval* parent, err_t* err ){
-  lval *chain = sexp_extract(parent);
-  lval *x;
-  while( chain ){
-    x = chain;
-    chain = x->sibling;
-     
-    x = eval_lval(sym_env, x, err);
-    lval_push(parent, x);
-  }
-}
-
-/*
-*/
 lval* dispatch_lambda(symbol_env* sym_env, lval* func, lval* args, err_t* err) {
-  /* preconditions */
-  /*
-  if( args->count != func->arg_list->count ) {
-    lval_clean(func,args,NULL);
-    return lval_err("number of arguments does not match function definition", err); // PPG ERR
-  } 
-  */
-
-  /* eval children */
-  eval_children(sym_env, args, err);
-  /*
-  for( unsigned i = 0; i < args->count; ++i ) {
-    args->cell[i] = eval_lval(sym_env, args->cell[i], err);
-    if( err->sig ){ return lval_clean(func,args,NULL); } // PPG ERR
-  }
-  */
-
   /* set up env */
-  populate_symbol_env(sym_env, func->arg_list, args, err); //arg_list and args destroyed here
+  populate_symbol_env(sym_env, func->parameters, args, err); //parameters and args destroyed here
   //note, this is effective because the lval's being pushed are already constructed
-  func->arg_list = NULL;
+  func->parameters = NULL;
   if( err->sig ){ return lval_clean(func,NULL,NULL); } //couldn't populate, pop back
 
   /* evaluate */
@@ -1036,47 +1027,18 @@ lval* sym_map_search(symbol_map* sym_map, char* key) {
 }
 
 //======================================
-lval* dispatch_builtin(symbol_env* sym_env, lval* func, lval* args, err_t* err) {
-  builtin_t builtin_code = func->builtin_code;
-  lval_del(func);
-
-  //SPECIAL functions
-  if( BUILTIN_DEFINE == builtin_code ){
-    return builtin_define(sym_env, args, err); /* PPG ERR */
-  }
-
-  /* not special: eval all children and call function */
-
-  //eval children
-  eval_children(sym_env, args, err);
-  /*
-  for( unsigned i = 0; i < args->count; ++i ) {
-    args->cell[i] = eval_lval(sym_env, args->cell[i], err);
-    if( err->sig ){ return lval_clean(args, NULL, NULL); }
-  }
-  */
-
-  //error handling 
-  /* TODO transistion from cell to LL
-  for( unsigned i = 0; i < args->count; ++i ) {
-    if(LVAL_ERR == args->cell[i]->type) {
-      return lval_take(args, i, err);
-    }
-  }
-  */
-
-  return builtin_op(sym_env, builtin_code, args, err);
-}
-
-//======================================
 lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err) {
+  //TODO check preconditions
+  
   /* set up pointers */
   /*
   if( 2 != args->count ) {
     return lval_err("define accepts exactly 2 args", err);
   }
   */
+
   lval* one = lval_pop(args);
+  one = lval_rip(one); 
   lval* x = lval_pop(args);
   lval_del(args);
 
@@ -1110,13 +1072,13 @@ lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err) {
 
 //======================================
 //FUNCTION: what you want to return is already in a list, just label it a qexp
-lval* builtin_list(lval* args) {
+lval* builtin_list( symbol_env *sym_env, lval *args, err_t *err ){
   args->type = LVAL_QEXP;
   return args;
 }
 
 //======================================
-lval* builtin_head(lval* args, err_t* err) {
+lval* builtin_head( symbol_env *sym_env, lval *args, err_t *err ){
   //check inputs
   /*
   if( 1 != args->count ) {
@@ -1145,7 +1107,7 @@ lval* builtin_head(lval* args, err_t* err) {
 }
 
 //======================================
-lval* builtin_tail(lval* x, err_t* err) {
+lval* builtin_tail( symbol_env *sym_env, lval *x, err_t *err ){
   /*
   //check good state
   if( 1 != args->count ) {
@@ -1164,7 +1126,7 @@ lval* builtin_tail(lval* x, err_t* err) {
 }
 
 //======================================
-lval* builtin_join(lval* args, err_t* err) {
+lval* builtin_join( symbol_env *sym_env, lval *args, err_t *err ){
   lval* master = lval_pop(args);
   //WARNING: what if you have a element which is just the NULL value?
   // The join could end prematurely and values would be lost
@@ -1194,7 +1156,7 @@ void lval_join(lval* master, lval* slave ){
 }
 
 //======================================
-lval* builtin_eval(symbol_env* sym_env, lval* args, err_t* err) {
+lval* builtin_eval( symbol_env* sym_env, lval* args, err_t* err ){
     /*
     if( 1 != args->count ) {
       return lval_err("eval accepts exactly 1 arg", err);
@@ -1211,43 +1173,9 @@ lval* builtin_eval(symbol_env* sym_env, lval* args, err_t* err) {
     return eval_lval(sym_env, input, err);
 }
 
-/* PURPOSE: dispatch builtin function based on builtin_code
-*/
-lval* builtin_op(symbol_env* sym_env, builtin_t builtin_code, lval* args, err_t* err) {
-  switch( builtin_code ){
-    case BUILTIN_LIST:
-      return builtin_list(args);
-    case BUILTIN_HEAD:
-      return builtin_head(args, err);
-    case BUILTIN_TAIL:
-      return builtin_tail(args, err);
-    case BUILTIN_JOIN:
-      return builtin_join(args, err);
-    case BUILTIN_EVAL:
-      return builtin_eval(sym_env, args, err);
-    case BUILTIN_LAMBDA:
-      return builtin_lambda(args, err);
-    case BUILTIN_PLUS:
-      return builtin_sum(args);
-    case BUILTIN_MINUS:
-      return builtin_minus(args);
-    case BUILTIN_MULT:
-      return builtin_mult(args);
-    case BUILTIN_DIV:
-      return builtin_div(args);
-    case BUILTIN_DEFINE: /* do nothing */
-      fucked_up("builtin_op","I was passed a DEFINE builtin. This should not happen");
-    case NOT_A_BUILTIN:
-      fucked_up("builtin_op","I was passed a lambda function. This should not happen");
-  }
-
-  fucked_up("builtin_op","unrecognized builtin operator");
-  return NULL; /* just so the compiler wont complain */
-}
-
 /* Note checking for overflow should be the job of LISP not here at a low level
 */
-lval* builtin_sum( lval* args ){
+lval* builtin_sum( symbol_env *sym_env, lval *args, err_t *err ){
   lval *x = lval_pop(args);
   for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num += y->num;
@@ -1261,7 +1189,7 @@ lval* builtin_sum( lval* args ){
 
 /*
 */
-lval* builtin_minus( lval* args ){
+lval* builtin_minus( symbol_env *sym_env, lval *args, err_t *err ){
   lval* x = lval_pop( args );
   for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num -= y->num;
@@ -1275,7 +1203,7 @@ lval* builtin_minus( lval* args ){
 
 /*
 */
-lval* builtin_mult( lval* args ){
+lval* builtin_mult( symbol_env *sym_env, lval *args, err_t *err ){
   lval* x = lval_pop( args );
   for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num *= y->num;
@@ -1289,7 +1217,7 @@ lval* builtin_mult( lval* args ){
 
 /*
 */
-lval* builtin_div( lval* args ){
+lval* builtin_div( symbol_env *sym_env, lval *args, err_t *err ){
   lval* x = lval_pop( args );
   for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
     x->num /= y->num;
@@ -1303,13 +1231,13 @@ lval* builtin_div( lval* args ){
 
 /*
 */
-lval* builtin_lambda( lval* args, err_t* err ){
-  lval* arg_list = lval_pop(args);
+lval* builtin_lambda( symbol_env *sym_env, lval *args, err_t *err ){
+  lval* parameters = lval_pop(args);
   lval* exp = lval_pop(args);
   //TODO again, use lval_empty to check for preconditions
-  // this will also involve making sure arg_list and exp are not NULL
+  // this will also involve making sure parameters and exp are not NULL
   lval_del(args);
-  return lval_lambda(arg_list, exp, err);
+  return lval_lambda(parameters, exp, err);
 }
 
 /* look for symbol, if value found, return a copy
@@ -1337,29 +1265,29 @@ char* builtin_names[] = {"define" ,"lambda" ,"eval"
 
 /* dispatch builtin function based on string
 */
-builtin_t builtin_fun_map( char *x ){
+builtin_fun* builtin_fun_map( char *x ){
   if( !strcmp( "define", x ) ){
-    return BUILTIN_DEFINE;
+    return builtin_define;
   } else if( !strcmp( "lambda", x ) ){
-    return BUILTIN_LAMBDA;
+    return builtin_lambda;
   } else if( !strcmp( "eval", x ) ){
-    return BUILTIN_EVAL;
+    return builtin_eval;
   } else if( !strcmp( "head", x ) ){
-    return BUILTIN_HEAD;
+    return builtin_head;
   } else if( !strcmp( "tail", x ) ){
-    return BUILTIN_TAIL;
+    return builtin_tail;
   } else if( !strcmp( "list", x ) ){
-    return BUILTIN_LIST;
+    return builtin_list;
   } else if( !strcmp( "join", x ) ){
-    return BUILTIN_JOIN;
+    return builtin_join;
   } else if( !strcmp( "+", x ) ){
-    return BUILTIN_PLUS;
+    return builtin_sum;
   } else if( !strcmp( "-", x ) ){
-    return BUILTIN_MINUS;
+    return builtin_minus;
   } else if( !strcmp( "*", x ) ){
-    return BUILTIN_MULT;
+    return builtin_mult;
   } else if( !strcmp( "/", x ) ){
-    return BUILTIN_DIV;
+    return builtin_div;
   } 
 
   fucked_up("builtin_fun_map", "unrecognized string");
@@ -1410,8 +1338,7 @@ void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
     return;
   }
 
-  symbol_add(sym_map, funx, xx, err);
-  //just propogate the error signal upwards; nothing to clean up
+  symbol_add(sym_map, funx, xx, err); // PPG ERR
 }
 
 //======================================
@@ -1504,25 +1431,25 @@ symbol_map* make_symbol_map(err_t* err) {
 }
 
 /* WARNING: this function assumes:
-** * arg_list->count == args->count
-** * arg_list is a sexp with only LVAL_SYM as children
+** * parameters->count == args->count
+** * parameters is a sexp with only LVAL_SYM as children
 ** * args is a sexp
 ** ---
-** consumes arg_list
+** consumes parameters
 ** consumes args
 */
-void populate_symbol_env( symbol_env* sym_env, lval* arg_list, lval* args, err_t* err ){
+void populate_symbol_env( symbol_env* sym_env, lval* parameters, lval* args, err_t* err ){
   /* create blank slate; */
   symbol_map* sym_map = make_symbol_map(err);
   if( err->sig ){
-    lval_clean( args, arg_list, NULL );
+    lval_clean( args, parameters, NULL );
     return;
   }
 
   /* populate */
-  for( lval *a = lval_pop(arg_list), *b = lval_pop(args);
+  for( lval *a = lval_pop(parameters), *b = lval_pop(args);
        a;
-       a = lval_pop(arg_list), b = lval_pop(args) ){
+       a = lval_pop(parameters), b = lval_pop(args) ){
     //make sure b is a valid value
     
     push_kv(sym_map, a->sym, b, err);
@@ -1533,13 +1460,13 @@ void populate_symbol_env( symbol_env* sym_env, lval* arg_list, lval* args, err_t
     lval_del( a );
 
     if( err->sig ){
-      lval_clean( args, arg_list, NULL );
+      lval_clean( args, parameters, NULL );
       return;
     }
   }
 
   /* clean up */
-  lval_clean( args, arg_list, NULL );
+  lval_clean( args, parameters, NULL );
   /* push */
   symbol_env_push(sym_env,sym_map, err);
 }
@@ -1627,28 +1554,12 @@ void print_chain( lval* chain ){
   puts("chain**");
 }
 
-/*
-lval** get_next(lval* parent) {
-  if( !(parent->first_child) ){
-    return &(parent->first_child);
-  }
-
-  lval* x = parent->first_child;
-  while( x->sibling ){
-    x = x->sibling;
-  }
-
-  return &(x->sibling);
-}
-*/
-
-/*
 char* lval_type_string(lval* v ) {
   switch(v->type) {
     case LVAL_NUM:
       return "num";
-    case LVAL_BUILTIN:
-      return "builtin";
+    case LVAL_FUN:
+      return "function";
     case LVAL_SYM:
       return "sym";
     case LVAL_ERR:
@@ -1659,12 +1570,7 @@ char* lval_type_string(lval* v ) {
       return "qexp";
     case LVAL_UNDEF:
       return "undef";
-    case LVAL_LAMBDA:
-      return "lambda";
-    default:
-      fucked_up("lval_type_string", "i dont recognize this type");
   }
   
   return "UNKNOWN TYPE";
 }
-*/
