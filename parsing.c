@@ -126,7 +126,7 @@ typedef struct err_t {
 
 /*
 */
-typedef enum lval_type_t { LVAL_NUM, LVAL_ERR, LVAL_SEXP, LVAL_QEXP,
+typedef enum lval_type_t { LVAL_NUM, LVAL_ERR, LVAL_SEXP,
 	                   LVAL_SYM, LVAL_FUN, LVAL_UNDEF,
                          } lval_type_t;
 
@@ -141,6 +141,7 @@ typedef lval* (builtin_fun)(symbol_env*, lval*, err_t* );
 */
 typedef struct lval {
   lval_type_t type;
+  bool quoted;
 
   int64_t num; /* num */
   char* err; /* err */
@@ -154,7 +155,7 @@ typedef struct lval {
   lval* parameters; 
   lval* exp;
 
-  /* sexp and qexp */
+  /* sexp */
   lval* sibling;
   lval* first_child;
   lval* last_child;
@@ -466,6 +467,7 @@ lval* lval_sexp(err_t* err) {
   }
 
   v->type  = LVAL_SEXP;
+  v->quoted = false;
   v->first_child = NULL;
   v->last_child = NULL;
   return v;
@@ -473,15 +475,12 @@ lval* lval_sexp(err_t* err) {
 
 //======================================
 lval* lval_qexp(err_t* err) {
-  lval* v = malloc(sizeof(lval));
-  if( !v ){
-    err->sig = OUT_OF_MEM;
+  lval* v = lval_sexp(err);
+  if( err->sig ){
     return NULL;
   }
 
-  v->type = LVAL_QEXP;
-  v->first_child = NULL;
-  v->last_child = NULL;
+  v->quoted = true;
   return v;
 }
 
@@ -603,7 +602,6 @@ void lval_del( lval *v ){
     case LVAL_SYM:
       free(v->sym);
       break;
-    case LVAL_QEXP:
     case LVAL_SEXP:
       lval_del_children( v );
       break;
@@ -633,26 +631,6 @@ lval* lval_clean( lval *a, lval *b, lval *c ){
 
 /* copy child list from src to des
 */
-lval* lval_copy_qexp(lval* src, err_t* err){
-  lval *dest = lval_qexp(err);
-  if( err->sig ){ return NULL; }
-
-  lval *x, *sib;
-  for( x = src->first_child; x; x = sib ){
-    /* record next sibling for later */
-    sib = x->sibling;
-
-    /* copy + push */
-    x = lval_copy(x, err);
-    if( err->sig ){ return lval_clean(dest, NULL, NULL); }
-    lval_push(dest, x);
-  }
-
-  return dest;
-}
-
-/* copy child list from src to des
-*/
 lval* lval_copy_sexp(lval* src, err_t* err){
   lval *dest = lval_sexp(err);
   if( err->sig ){ return NULL; }
@@ -668,6 +646,7 @@ lval* lval_copy_sexp(lval* src, err_t* err){
     lval_push(dest, x);
   }
 
+  dest->quoted = src->quoted;
   return dest;
 }
 
@@ -705,8 +684,6 @@ lval* lval_copy( lval *v, err_t *err ){
       return lval_copy_func(v, err);
     case LVAL_SYM:
       return lval_sym(v->sym, err);
-    case LVAL_QEXP:
-      return lval_copy_qexp(v, err);
     case LVAL_SEXP:
       return lval_copy_sexp(v, err);
     default:
@@ -784,6 +761,8 @@ lval* read_lval_qexp( mpc_ast_t* t, err_t* err ){
     lval_del(v);
     return NULL;
   }
+
+  v->quoted = true;
 
   return read_children(v, t, err);
 }
@@ -868,22 +847,21 @@ void print_lval(lval* x) {
       printf("[ERROR: %s] ", x->err);
       break;
     case LVAL_SEXP:
-      printf("(");
+      if( x->quoted ){
+        printf("{");
+      } else {
+        printf("(");
+      }
       a = x->first_child;
       while( a ){
         print_lval(a);
 	a = a->sibling;
       }
-      printf(")");
-      break;
-    case LVAL_QEXP:
-      fputs("{",stdout);
-      a = x->first_child;
-      while( a ){
-        print_lval(a);
-	a = a->sibling;
+      if( x->quoted ){
+        printf("} ");
+      } else {
+        printf(") ");
       }
-      fputs("} ",stdout);
       break;
     case LVAL_UNDEF:
       printf("<undef> ");
@@ -956,11 +934,14 @@ lval* eval_lval( symbol_env* sym_env, lval* v, err_t* err ){
     case LVAL_SYM:
       return eval_symbol(sym_env, v, err);
     case LVAL_SEXP:
-      return eval_sexp(sym_env, v, err);
+      if( v->quoted ){
+        return v;
+      } else {
+        return eval_sexp(sym_env, v, err);
+      }
     case LVAL_NUM:
     case LVAL_UNDEF:
-    case LVAL_QEXP:
-    case LVAL_FUN: /* does this belong here? */
+    case LVAL_FUN:
       return v;
     default:
       fucked_up("eval_lval", "I don't recognize this type yo");
@@ -979,7 +960,7 @@ lval* dispatch_lambda(symbol_env* sym_env, lval* func, lval* args, err_t* err) {
   if( err->sig ){ return lval_clean(func,NULL,NULL); } //couldn't populate, pop back
 
   /* evaluate */
-  func->exp->type = LVAL_SEXP;
+  func->exp->quoted = false;
   lval* return_val = eval_sexp(sym_env, func->exp, err);
   func->exp = NULL;
   if( err->sig ){ return lval_clean(func,NULL,NULL); }
@@ -1073,7 +1054,8 @@ lval* builtin_define(symbol_env* sym_env, lval* args, err_t* err) {
 //======================================
 //FUNCTION: what you want to return is already in a list, just label it a qexp
 lval* builtin_list( symbol_env *sym_env, lval *args, err_t *err ){
-  args->type = LVAL_QEXP;
+  args->type = LVAL_SEXP;
+  args->quoted = true;
   return args;
 }
 
@@ -1099,8 +1081,8 @@ lval* builtin_head( symbol_env *sym_env, lval *args, err_t *err ){
   lval* head = lval_rip(list);
 
   //preserve quoting for nested expressions
-  if( LVAL_SEXP == head->type ) {
-    head->type = LVAL_QEXP;
+  if( !(head->quoted) ){
+    head->quoted = true;
   }
 
   return head;
@@ -1165,7 +1147,7 @@ lval* builtin_eval( symbol_env* sym_env, lval* args, err_t* err ){
 
     lval* input = lval_rip(args);//the rest of ARGS will be freed here
     // TODO input = lval_pop(args); if( !sexp_empty(args) ){ lval_err(....
-    if( LVAL_QEXP != input->type ) {
+    if( !(input->quoted) ) {
       return lval_err("eval expected qexp", err);
     }
 
@@ -1566,8 +1548,6 @@ char* lval_type_string(lval* v ) {
       return "err";
     case LVAL_SEXP:
       return "sexp";
-    case LVAL_QEXP:
-      return "qexp";
     case LVAL_UNDEF:
       return "undef";
   }
