@@ -39,7 +39,8 @@
  * ie dynamically allocated strings and strings on the heap
 ## Error Handling
 * after every xalloc, handle the split between 'enough mem' and 'out of mem'
-* only build one semantic peiece at a time, if a memory error occurs, you will know what to clean up
+* only build one semantic peiece at a time, if a memory error occurs, you will
+know what to clean up
 ### If you caught a memory error
 * free any state you consume
 * return NULL
@@ -57,11 +58,11 @@
 --------------------------------------------------------------------------------
 # Further reasearch
 */
-#include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #include "linenoise/linenoise.h"
 #include "mpc/mpc.h"
 
@@ -70,11 +71,13 @@
 ********************************************************************************/
 int mallocfail = -5000;
 #define oldmalloc(x) (malloc(x))
-#define malloc(x) ( (1 == ++mallocfail) ? NULL : oldmalloc(x) )
+#define malloc(x) ((1 == ++mallocfail) ? NULL : oldmalloc(x))
 
 /*
 */
-void fucked_up(char* function_name, char* err_msg) {
+void
+fucked_up(char* function_name, char* err_msg)
+{
   fprintf(stderr, "[ERROR] %s: %s\n", function_name, err_msg);
   exit(1);
 }
@@ -83,23 +86,27 @@ void fucked_up(char* function_name, char* err_msg) {
 ** TODO replace calloc with this malloc wraper
 ** TODO learn more about valgrind
 */
-void* x_malloc( size_t num, size_t size ){
-  if( !size || !num ){
+void*
+x_malloc(size_t num, size_t size)
+{
+  if (!size || !num) {
     return malloc(0);
   }
 
   size_t total = num * size;
-  if( total < num ){
-    fucked_up("malloc","integer oveflow");
+  if (total < num) {
+    fucked_up("malloc", "integer oveflow");
   }
 
   return malloc(total);
 }
 
-size_t inc_size( size_t x ){
+size_t
+inc_size(size_t x)
+{
   x += 1u;
 
-  if( !x ){
+  if (!x) {
     fucked_up("inc_size", "unsigned carry(overflow)");
   }
 
@@ -121,11 +128,12 @@ typedef struct err_t err_t;
 struct lval;
 typedef struct lval lval;
 
-typedef lval* (builtin_fun)(symbol_map*, lval*, err_t* );
+typedef lval*(builtin_fun)(symbol_map*, lval*, err_t*);
 
 /*
 */
-struct keyval {
+struct keyval
+{
   char* key;
   lval* value;
   keyval* sibling;
@@ -133,146 +141,223 @@ struct keyval {
 
 /*
 */
-struct symbol_map {
+struct symbol_map
+{
   keyval *first_child, *last_child;
-  symbol_map *parent;
+  symbol_map* parent;
 };
 
 /*
 */
-enum builtin_t {NOT_A_BUILTIN,
-	                BUILTIN_DEFINE, BUILTIN_LAMBDA, BUILTIN_EVAL,
-	                BUILTIN_HEAD, BUILTIN_TAIL, BUILTIN_LIST, BUILTIN_JOIN,
-			BUILTIN_PLUS, BUILTIN_MINUS, BUILTIN_MULT, BUILTIN_DIV,
-                       };
+enum builtin_t
+{
+  NOT_A_BUILTIN,
+  BUILTIN_DEFINE,
+  BUILTIN_LAMBDA,
+  BUILTIN_EVAL,
+  BUILTIN_HEAD,
+  BUILTIN_TAIL,
+  BUILTIN_LIST,
+  BUILTIN_JOIN,
+  BUILTIN_PLUS,
+  BUILTIN_MINUS,
+  BUILTIN_MULT,
+  BUILTIN_DIV,
+};
 typedef enum builtin_t builtin_t;
 
 /*
 */
-enum err_sig_t {OK, OUT_OF_MEM};
+enum err_sig_t
+{
+  OK,
+  OUT_OF_MEM
+};
 typedef enum err_sig_t err_sig_t;
 
-struct err_t {
+struct err_t
+{
   err_sig_t sig;
 };
 
 /*
 */
-typedef enum lval_type_t { LVAL_NUM, LVAL_ERR, LVAL_SEXP,
-	                   LVAL_SYM, LVAL_FUN, LVAL_UNDEF,
-                         } lval_type_t;
+enum lval_type_t
+{
+  LVAL_NUM,
+  LVAL_ERR,
+  LVAL_SEXP,
+  LVAL_SYM,
+  LVAL_FUN,
+  LVAL_UNDEF,
+};
+typedef enum lval_type_t lval_type_t;
 
 /*
 */
-typedef struct lval {
+struct lval
+{
   lval_type_t type;
   bool quoted;
 
   int64_t num; /* num */
-  char* err; /* err */
-  char* sym; /* symbol */
+  char* err;   /* err */
+  char* sym;   /* symbol */
 
   /* functions */
 
   /* - builtin */
-  builtin_fun *builtin;
+  builtin_fun* builtin;
   /* - lambda */
-  lval* parameters; 
+  lval* parameters;
   lval* exp;
 
   /* sexp */
   lval* sibling;
   lval* first_child;
   lval* last_child;
-} lval;
+};
+typedef struct lval lval;
 
 /********************************************************************************
 * PROTOTYPES
 ********************************************************************************/
-//debugging
-char* lval_type_string(lval* v );
+// debugging
+char*
+lval_type_string(lval* v);
 
-//main
-char* prompt(void);
-void repl( mpc_parser_t* Lispy, symbol_map* sym_env, err_t* err );
+// main
+char*
+prompt(void);
+void
+repl(mpc_parser_t* Lispy, symbol_map* sym_env, err_t* err);
 
-//constructors
-lval* lval_num(int64_t x, err_t* err);
-lval* lval_err(char* err_msg, err_t* err);
-lval* lval_sym(char* sym_string, err_t* err);
-lval* lval_sexp(err_t* err);
-lval* lval_qexp(err_t* err);
-lval* lval_undef(err_t* err);
-lval* lval_lambda(lval* parameters, lval* exp, err_t* err);
+// constructors
+lval*
+lval_num(int64_t x, err_t* err);
+lval*
+lval_err(char* err_msg, err_t* err);
+lval*
+lval_sym(char* sym_string, err_t* err);
+lval*
+lval_sexp(err_t* err);
+lval*
+lval_qexp(err_t* err);
+lval*
+lval_undef(err_t* err);
+lval*
+lval_lambda(lval* parameters, lval* exp, err_t* err);
 
-//lval utils
-lval* lval_rip(lval* parent);
-void lval_push(lval* v, lval* child);
-lval* lval_pop(lval* parent);
-void lval_join(lval* x, lval* y);
-char* rip_sym( lval *v );
+// lval utils
+lval*
+lval_rip(lval* parent);
+void
+lval_push(lval* v, lval* child);
+lval*
+lval_pop(lval* parent);
+void
+lval_join(lval* x, lval* y);
+char*
+rip_sym(lval* v);
 
-//lval del
-void  lval_del(lval* v);
-lval* lval_clean( lval *a, lval *b, lval *c );
+// lval del
+void
+lval_del(lval* v);
+lval*
+lval_clean(lval* a, lval* b, lval* c);
 
-//lval copy
-lval* lval_copy(lval* v, err_t* err);
-lval* lval_copy_sexp(lval* in, err_t* err);
+// lval copy
+lval*
+lval_copy(lval* v, err_t* err);
+lval*
+lval_copy_sexp(lval* in, err_t* err);
 
-//lval read
-lval* lisp_read(mpc_ast_t* t, err_t* err);
-lval* read_lval(mpc_ast_t* t, err_t* err);
-lval* read_children(lval* parent, mpc_ast_t* t, err_t* err);
-lval* read_num(mpc_ast_t* t, err_t* err);
+// lval read
+lval*
+lisp_read(mpc_ast_t* t, err_t* err);
+lval*
+read_lval(mpc_ast_t* t, err_t* err);
+lval*
+read_children(lval* parent, mpc_ast_t* t, err_t* err);
+lval*
+read_num(mpc_ast_t* t, err_t* err);
 
-//lval print
-void print(lval* x);
-void print_lval(lval* x);
+// lval print
+void
+print(lval* x);
+void
+print_lval(lval* x);
 
-//lval eval
-lval* eval_lval(symbol_map*, lval* v, err_t* err);
-lval* eval_sexp(symbol_map*, lval* v, err_t* err);
-lval* eval_symbol( symbol_map* sym_env, lval* x, err_t* err );
-lval* builtin_op(symbol_map* sym_env, builtin_t builtin_code, lval* args, err_t* err);
-lval* dispatch_lambda(symbol_map*, lval* func, lval* args, err_t* err);
+// lval eval
+lval*
+eval_lval(symbol_map*, lval* v, err_t* err);
+lval*
+eval_sexp(symbol_map*, lval* v, err_t* err);
+lval*
+eval_symbol(symbol_map* sym_env, lval* x, err_t* err);
+lval*
+builtin_op(symbol_map* sym_env, builtin_t builtin_code, lval* args, err_t* err);
+lval*
+dispatch_lambda(symbol_map*, lval* func, lval* args, err_t* err);
 
 /* BUILTINS */
 
 /* most complex builtins, require all three args */
-lval* builtin_define(symbol_map* sym_env, lval* args, err_t* err);
-lval* builtin_eval(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_define(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_eval(symbol_map* sym_env, lval* args, err_t* err);
 
 /* these builtins operate directly on their args, no sym_env needed */
-lval* builtin_lambda(symbol_map* sym_env, lval* args, err_t* err);
-lval* builtin_head(symbol_map *sym_env, lval *args, err_t *err );
-lval* builtin_tail(symbol_map *sym_env, lval *args, err_t *err );
-lval* builtin_join(symbol_map *sym_env, lval *args, err_t *err );
+lval*
+builtin_lambda(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_head(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_tail(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_join(symbol_map* sym_env, lval* args, err_t* err);
 
 /* safe builtins, no chance of memory errors */
-lval* builtin_list(symbol_map *sym_env, lval *args, err_t *err );
-lval* builtin_sum(symbol_map *sym_env, lval *args, err_t *err );
-lval* builtin_minus(symbol_map *sym_env, lval *args, err_t *err );
-lval* builtin_mult(symbol_map *sym_env, lval *args, err_t *err );
-lval* builtin_div(symbol_map *sym_env, lval *args, err_t *err );
+lval*
+builtin_list(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_sum(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_minus(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_mult(symbol_map* sym_env, lval* args, err_t* err);
+lval*
+builtin_div(symbol_map* sym_env, lval* args, err_t* err);
 
 /* symbols */
-symbol_map* init_global_map( err_t* err );
-void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
-bool symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err);
-void kv_push(symbol_map* sym_map, char* key, lval* value, err_t* err);
-symbol_map* sym_map_make(err_t* err);
-void sym_map_del( symbol_map* sym_map );
-builtin_fun* builtin_fun_map( char *x );
-lval* sym_search(symbol_map* env, char* key);
-symbol_map* populate(symbol_map* parent, lval* parameters, lval* args, err_t* err);
+symbol_map*
+init_global_map(err_t* err);
+void
+push_builtin(symbol_map* sym_map, char* fun_name, err_t* err);
+bool
+symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err);
+void
+kv_push(symbol_map* sym_map, char* key, lval* value, err_t* err);
+symbol_map*
+sym_map_make(err_t* err);
+void
+sym_map_del(symbol_map* sym_map);
+builtin_fun*
+builtin_fun_map(char* x);
+lval*
+sym_search(symbol_map* env, char* key);
+symbol_map*
+populate(symbol_map* parent, lval* parameters, lval* args, err_t* err);
 
 /********************************************************************************
 * SHOULD BE IN string.h
 ********************************************************************************/
-char* strdup(char* input, err_t* err) {
-  char* x = calloc( inc_size(strlen(input)), sizeof(char) );
-  if( !x ){
+char*
+strdup(char* input, err_t* err)
+{
+  char* x = calloc(inc_size(strlen(input)), sizeof(char));
+  if (!x) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
@@ -288,12 +373,14 @@ symbol_map* SYM_MAP;
 /********************************************************************************
 * MAIN
 ********************************************************************************/
-int main(int argc, char* argv[] ) {
+int
+main(int argc, char* argv[])
+{
   /*** INIT ***/
-  
+
   /* error struct */
   err_t* err = malloc(sizeof(err_t));
-  if( !err ) {
+  if (!err) {
     printf("1 insufficient mem for baseline framework\n");
     exit(1);
   }
@@ -301,12 +388,12 @@ int main(int argc, char* argv[] ) {
 
   /* symbol env */
   SYM_MAP = init_global_map(err);
-  if( err->sig ){
+  if (err->sig) {
     free(err);
     printf("2 insufficient mem for baseline framework\n");
     exit(1);
   }
-  symbol_map* sym_env = SYM_MAP;//dirty hack to satisfy type system for now
+  symbol_map* sym_env = SYM_MAP; // dirty hack to satisfy type system for now
 
   /* parser */
   mpc_parser_t* Number = mpc_new("number");
@@ -316,20 +403,25 @@ int main(int argc, char* argv[] ) {
   mpc_parser_t* Expr = mpc_new("expr");
   mpc_parser_t* Lispy = mpc_new("lispy");
 
-  mpca_lang(MPCA_LANG_DEFAULT
-    ," \
+  mpca_lang(MPCA_LANG_DEFAULT,
+            " \
        number : /-?[0-9]+/ ;\
        symbol : '+' | '-' | '*' | '/' | /[a-zA-Z0-0_&]+/ ;\
        sexp : '(' <expr>+ ')' ;\
        qexp : '{' <expr>+ '}' ;\
        expr : <number> | <symbol> | <sexp> | <qexp>;\
        lispy : /^/ <expr>+ /$/ ;\
-     "
-    ,Number ,Symbol ,Sexp ,Qexp ,Expr ,Lispy);
-  
+     ",
+            Number,
+            Symbol,
+            Sexp,
+            Qexp,
+            Expr,
+            Lispy);
+
   /*** REPL ***/
   repl(Lispy, sym_env, err);
-  
+
   /*** CLEAN ***/
   free(err);
   mpc_cleanup(6, Number, Symbol, Sexp, Qexp, Expr, Lispy);
@@ -343,7 +435,9 @@ int main(int argc, char* argv[] ) {
 
 /*
 */
-char* prompt(void) {
+char*
+prompt(void)
+{
   puts("\n+--------------------------------------+");
   char* input = linenoise("> ");
   linenoiseHistoryAdd(input);
@@ -352,33 +446,35 @@ char* prompt(void) {
 
 /*
 */
-void repl( mpc_parser_t* Lispy, symbol_map* sym_env, err_t* err ){
+void
+repl(mpc_parser_t* Lispy, symbol_map* sym_env, err_t* err)
+{
   puts("Lispy v0.1.0");
   puts("Enter 'EXIT' to exit");
 
   mpc_result_t r; /* holds the ast */
-  lval *x;
-  char* input = prompt(); 
-  while( strcmp(input,"QUIT") ){
-    if( mpc_parse("<stdin>", input, Lispy, &r)) {
+  lval* x;
+  char* input = prompt();
+  while (strcmp(input, "QUIT")) {
+    if (mpc_parse("<stdin>", input, Lispy, &r)) {
       /* read */
       x = lisp_read(r.output, err);
-      if( err->sig ){
-	printf("[ERR] Unable to READ lval due to insufficient memory\n");
-	lval_del(x);
+      if (err->sig) {
+        printf("[ERR] Unable to READ lval due to insufficient memory\n");
+        lval_del(x);
 
-	err->sig = OK;
-	goto clean_repl;
+        err->sig = OK;
+        goto clean_repl;
       }
 
       /* eval */
       x = eval_lval(sym_env, x, err);
-      if( err->sig ){
-	printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
-	lval_del(x);
+      if (err->sig) {
+        printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
+        lval_del(x);
 
-	err->sig = OK;
-	goto clean_repl;
+        err->sig = OK;
+        goto clean_repl;
       }
 
       /* print */
@@ -389,7 +485,7 @@ void repl( mpc_parser_t* Lispy, symbol_map* sym_env, err_t* err ){
       mpc_err_delete(r.error);
     }
 
-    clean_repl:
+  clean_repl:
     free(input);
     input = prompt();
   }
@@ -399,9 +495,11 @@ void repl( mpc_parser_t* Lispy, symbol_map* sym_env, err_t* err ){
 /********************************************************************************
 * CONSTRUCTORS
 ********************************************************************************/
-lval* lval_num(int64_t number, err_t* err) {
+lval*
+lval_num(int64_t number, err_t* err)
+{
   lval* v = malloc(sizeof(lval));
-  if( !v ){
+  if (!v) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
@@ -413,45 +511,55 @@ lval* lval_num(int64_t number, err_t* err) {
 
 /*
 */
-lval* lval_err(char* err_msg, err_t* err) {
+lval*
+lval_err(char* err_msg, err_t* err)
+{
   lval* v = malloc(sizeof(lval));
-  if( !v ){
+  if (!v) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
 
   v->type = LVAL_ERR;
   v->err = strdup(err_msg, err);
-  if( err->sig ){ return lval_clean(v, NULL, NULL); }
+  if (err->sig) {
+    return lval_clean(v, NULL, NULL);
+  }
 
   return v;
 }
 
 /* sym_string is only read
 */
-lval* lval_sym(char* sym_string, err_t* err) {
+lval*
+lval_sym(char* sym_string, err_t* err)
+{
   lval* v = malloc(sizeof(lval));
-  if( !v ){
+  if (!v) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
 
   v->type = LVAL_SYM;
   v->sym = strdup(sym_string, err);
-  if( err->sig ){ return lval_clean(v, NULL, NULL); }
+  if (err->sig) {
+    return lval_clean(v, NULL, NULL);
+  }
 
   return v;
 }
 
 //======================================
-lval* lval_sexp(err_t* err) {
-  lval* v  = malloc(sizeof(lval));
-  if( !v ){
+lval*
+lval_sexp(err_t* err)
+{
+  lval* v = malloc(sizeof(lval));
+  if (!v) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
 
-  v->type  = LVAL_SEXP;
+  v->type = LVAL_SEXP;
   v->quoted = false;
   v->first_child = NULL;
   v->last_child = NULL;
@@ -459,9 +567,11 @@ lval* lval_sexp(err_t* err) {
 }
 
 //======================================
-lval* lval_qexp(err_t* err) {
+lval*
+lval_qexp(err_t* err)
+{
   lval* v = lval_sexp(err);
-  if( err->sig ){
+  if (err->sig) {
     return NULL;
   }
 
@@ -470,9 +580,11 @@ lval* lval_qexp(err_t* err) {
 }
 
 //======================================
-lval* lval_builtin(builtin_fun *fun, err_t* err) {
+lval*
+lval_builtin(builtin_fun* fun, err_t* err)
+{
   lval* v = malloc(sizeof(lval));
-  if( !v ){
+  if (!v) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
@@ -483,9 +595,11 @@ lval* lval_builtin(builtin_fun *fun, err_t* err) {
 }
 
 //======================================
-lval* lval_undef(err_t* err) {
+lval*
+lval_undef(err_t* err)
+{
   lval* x = malloc(sizeof(lval));
-  if( !x ){
+  if (!x) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
@@ -495,9 +609,11 @@ lval* lval_undef(err_t* err) {
 }
 
 //======================================
-lval* lval_lambda(lval* parameters, lval* exp, err_t* err) {
+lval*
+lval_lambda(lval* parameters, lval* exp, err_t* err)
+{
   lval* x = malloc(sizeof(lval));
-  if( !x ){
+  if (!x) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
@@ -506,7 +622,7 @@ lval* lval_lambda(lval* parameters, lval* exp, err_t* err) {
   x->builtin = NULL;
   x->parameters = parameters;
   x->exp = exp;
-  x->exp->quoted = false; //WARNING removing the quoting
+  x->exp->quoted = false; // WARNING removing the quoting
   return x;
 }
 
@@ -515,11 +631,13 @@ lval* lval_lambda(lval* parameters, lval* exp, err_t* err) {
 ********************************************************************************/
 /* Push
 */
-void lval_push(lval* v, lval* child) {
+void
+lval_push(lval* v, lval* child)
+{
   /* prep */
   child->sibling = NULL;
 
-  if( v->last_child ){
+  if (v->last_child) {
     (v->last_child)->sibling = child;
     v->last_child = child;
   } else {
@@ -530,9 +648,11 @@ void lval_push(lval* v, lval* child) {
 
 /*
 */
-lval* lval_pop(lval* parent) {
+lval*
+lval_pop(lval* parent)
+{
   lval* x = parent->first_child;
-  if( x ){
+  if (x) {
     parent->first_child = x->sibling;
   }
 
@@ -541,16 +661,20 @@ lval* lval_pop(lval* parent) {
 
 /*
 */
-lval* lval_rip(lval* parent) {
-  lval* x = lval_pop( parent );
+lval*
+lval_rip(lval* parent)
+{
+  lval* x = lval_pop(parent);
   lval_del(parent);
   return x;
 }
 
 /*
 */
-char* rip_sym( lval *v ){
-  char *x = v->sym;
+char*
+rip_sym(lval* v)
+{
+  char* x = v->sym;
   v->sym = NULL;
   lval_del(v);
   return x;
@@ -562,9 +686,11 @@ char* rip_sym( lval *v ){
 
 /* delete all children from a sexp/qexp
 */
-void lval_del_children( lval* parent ){
-  lval *sib;
-  for( lval *a = parent->first_child; a; a = sib ){
+void
+lval_del_children(lval* parent)
+{
+  lval* sib;
+  for (lval* a = parent->first_child; a; a = sib) {
     sib = a->sibling;
     lval_del(a);
   }
@@ -572,9 +698,11 @@ void lval_del_children( lval* parent ){
 
 /* WARNING: this does not delete the struct itself, only the approriate elements
 */
-void lval_del_func( lval *v ){
+void
+lval_del_func(lval* v)
+{
   /* if a lambda expression */
-  if( !(v->builtin) ){
+  if (!(v->builtin)) {
     lval_del(v->exp);
     lval_del(v->parameters);
   }
@@ -584,10 +712,14 @@ void lval_del_func( lval *v ){
 
 /* recursively free the memory used by an lval
 */
-void lval_del( lval *v ){
-  if( !v ){ return; }
+void
+lval_del(lval* v)
+{
+  if (!v) {
+    return;
+  }
 
-  switch( v->type ){
+  switch (v->type) {
     case LVAL_NUM:
     case LVAL_UNDEF:
       break; /* do nothing */
@@ -598,13 +730,13 @@ void lval_del( lval *v ){
       free(v->sym);
       break;
     case LVAL_SEXP:
-      lval_del_children( v );
+      lval_del_children(v);
       break;
     case LVAL_FUN:
       lval_del_func(v);
       break;
     default:
-      fucked_up("lval_del","I dont recognize this type yo");
+      fucked_up("lval_del", "I dont recognize this type yo");
       break;
   }
 
@@ -613,7 +745,9 @@ void lval_del( lval *v ){
 
 /* Free the memory used by up to three lvals
 */
-lval* lval_clean( lval *a, lval *b, lval *c ){
+lval*
+lval_clean(lval* a, lval* b, lval* c)
+{
   lval_del(a);
   lval_del(b);
   lval_del(c);
@@ -626,18 +760,24 @@ lval* lval_clean( lval *a, lval *b, lval *c ){
 
 /* copy child list from src to des
 */
-lval* lval_copy_sexp(lval* src, err_t* err){
-  lval *dest = lval_sexp(err);
-  if( err->sig ){ return NULL; }
+lval*
+lval_copy_sexp(lval* src, err_t* err)
+{
+  lval* dest = lval_sexp(err);
+  if (err->sig) {
+    return NULL;
+  }
 
   lval *x, *sib;
-  for( x = src->first_child; x; x = sib ){
+  for (x = src->first_child; x; x = sib) {
     /* record next sibling for later */
     sib = x->sibling;
 
     /* copy + push */
     x = lval_copy(x, err);
-    if( err->sig ){ return lval_clean(dest, NULL, NULL); }
+    if (err->sig) {
+      return lval_clean(dest, NULL, NULL);
+    }
     lval_push(dest, x);
   }
 
@@ -647,20 +787,30 @@ lval* lval_copy_sexp(lval* src, err_t* err){
 
 /* copy a lambda expression
 */
-lval* copy_lambda(lval* src, err_t* err){
-  lval *a = lval_copy(src->parameters, err);
-  if( err->sig ){ return NULL; }
-  lval *b = lval_copy(src->exp, err);
-  if( err->sig ){ return lval_clean(a, NULL, NULL); }
-  lval *x = lval_lambda(a,b,err);
-  if( err->sig ){ return lval_clean(a, b, NULL); }
+lval*
+copy_lambda(lval* src, err_t* err)
+{
+  lval* a = lval_copy(src->parameters, err);
+  if (err->sig) {
+    return NULL;
+  }
+  lval* b = lval_copy(src->exp, err);
+  if (err->sig) {
+    return lval_clean(a, NULL, NULL);
+  }
+  lval* x = lval_lambda(a, b, err);
+  if (err->sig) {
+    return lval_clean(a, b, NULL);
+  }
   return x;
 }
 
 /*
 */
-lval* lval_copy_func( lval *v, err_t *err ){
-  if( v->builtin ){
+lval*
+lval_copy_func(lval* v, err_t* err)
+{
+  if (v->builtin) {
     return lval_builtin(v->builtin, err);
   }
 
@@ -669,8 +819,10 @@ lval* lval_copy_func( lval *v, err_t *err ){
 
 /* purpose: dispatch copy function based on lval type
 */
-lval* lval_copy( lval *v, err_t *err ){
-  switch(v->type) {
+lval*
+lval_copy(lval* v, err_t* err)
+{
+  switch (v->type) {
     case LVAL_UNDEF:
       return lval_undef(err);
     case LVAL_NUM:
@@ -692,20 +844,28 @@ lval* lval_copy( lval *v, err_t *err ){
 ********************************************************************************/
 /*
 */
-typedef enum ast_tag_t { UNRECOGNIZED_TAG,
-	                 NUMBER_TAG, SYMBOL_TAG, QEXP_TAG, SEXP_TAG, TOPLEVEL_TAG, } ast_tag_t;
-ast_tag_t tag_map( char *tag ) {
-  if( strstr(tag,"number") ) {
+typedef enum ast_tag_t {
+  UNRECOGNIZED_TAG,
+  NUMBER_TAG,
+  SYMBOL_TAG,
+  QEXP_TAG,
+  SEXP_TAG,
+  TOPLEVEL_TAG,
+} ast_tag_t;
+ast_tag_t
+tag_map(char* tag)
+{
+  if (strstr(tag, "number")) {
     return NUMBER_TAG;
-  } else if( strstr(tag,"symbol") ) {
+  } else if (strstr(tag, "symbol")) {
     return SYMBOL_TAG;
-  } else if( strstr(tag,"qexp") ) {
+  } else if (strstr(tag, "qexp")) {
     return QEXP_TAG;
-  } else if( strstr(tag,"sexp") ) {
+  } else if (strstr(tag, "sexp")) {
     return SEXP_TAG;
-  } else if( !strcmp(tag,">") ) {
+  } else if (!strcmp(tag, ">")) {
     return TOPLEVEL_TAG;
-  } 
+  }
 
   return UNRECOGNIZED_TAG;
 }
@@ -713,20 +873,22 @@ ast_tag_t tag_map( char *tag ) {
 /* If read unsuccessful, will clean up ENTIRE parent tree
 ** ast is only read
 */
-lval* read_children(lval* parent, mpc_ast_t* t, err_t* err) {
+lval*
+read_children(lval* parent, mpc_ast_t* t, err_t* err)
+{
   uint32_t count = t->children_num;
   lval* next_child;
-  for( size_t i = 0; i < count; i=inc_size(i) ){
-    //if not a bracket, then it is a child value
-    if( strcmp(t->children[i]->tag, "regex")
-        && strncmp(t->children[i]->contents, "(", 1) 
-        && strncmp(t->children[i]->contents, ")", 1)
-        && strncmp(t->children[i]->contents, "{", 1) 
-        && strncmp(t->children[i]->contents, "}", 1) ){
+  for (size_t i = 0; i < count; i = inc_size(i)) {
+    // if not a bracket, then it is a child value
+    if (strcmp(t->children[i]->tag, "regex") &&
+        strncmp(t->children[i]->contents, "(", 1) &&
+        strncmp(t->children[i]->contents, ")", 1) &&
+        strncmp(t->children[i]->contents, "{", 1) &&
+        strncmp(t->children[i]->contents, "}", 1)) {
       next_child = read_lval(t->children[i], err);
-      if( err->sig ){
+      if (err->sig) {
         lval_del(parent);
-	return NULL;
+        return NULL;
       }
 
       lval_push(parent, next_child);
@@ -738,9 +900,11 @@ lval* read_children(lval* parent, mpc_ast_t* t, err_t* err) {
 
 /*
 */
-lval* read_lval_sexp( mpc_ast_t* t, err_t* err ){
-  lval *v = lval_sexp(err);
-  if( err->sig ){
+lval*
+read_lval_sexp(mpc_ast_t* t, err_t* err)
+{
+  lval* v = lval_sexp(err);
+  if (err->sig) {
     lval_del(v);
     return NULL;
   }
@@ -750,9 +914,11 @@ lval* read_lval_sexp( mpc_ast_t* t, err_t* err ){
 
 /*
 */
-lval* read_lval_qexp( mpc_ast_t* t, err_t* err ){
-  lval *v = lval_qexp(err);
-  if( err->sig ){
+lval*
+read_lval_qexp(mpc_ast_t* t, err_t* err)
+{
+  lval* v = lval_qexp(err);
+  if (err->sig) {
     lval_del(v);
     return NULL;
   }
@@ -764,18 +930,22 @@ lval* read_lval_qexp( mpc_ast_t* t, err_t* err ){
 
 /*
 */
-lval* lisp_read( mpc_ast_t* t, err_t* err ){
-  lval* x = read_lval(t, err); //propagate error
-  mpc_ast_delete(t); //clean up
-  return x; //propage error
+lval*
+lisp_read(mpc_ast_t* t, err_t* err)
+{
+  lval* x = read_lval(t, err); // propagate error
+  mpc_ast_delete(t);           // clean up
+  return x;                    // propage error
 }
 
 /* purpose: dispatch reader function based on ast tag
 */
-lval* read_lval( mpc_ast_t* t, err_t* err ){
+lval*
+read_lval(mpc_ast_t* t, err_t* err)
+{
   ast_tag_t tag = tag_map(t->tag);
 
-  switch( tag ){
+  switch (tag) {
     case NUMBER_TAG:
       return read_num(t, err);
     case SYMBOL_TAG:
@@ -792,12 +962,14 @@ lval* read_lval( mpc_ast_t* t, err_t* err ){
   }
 }
 
-/* 
+/*
 */
-lval* read_num(mpc_ast_t* t, err_t* err) {
+lval*
+read_num(mpc_ast_t* t, err_t* err)
+{
   errno = 0;
-  int64_t num = strtol(t->contents,NULL,10);
-  if( errno == ERANGE ) {
+  int64_t num = strtol(t->contents, NULL, 10);
+  if (errno == ERANGE) {
     return lval_err("number out of range", err);
   }
 
@@ -809,15 +981,19 @@ lval* read_num(mpc_ast_t* t, err_t* err) {
 ********************************************************************************/
 /*
 */
-void print( lval* x ){
+void
+print(lval* x)
+{
   print_lval(x);
   lval_del(x);
 }
 
 /*
 */
-void print_lval_func( lval *x ){
-  if( x->builtin ){
+void
+print_lval_func(lval* x)
+{
+  if (x->builtin) {
     printf("<builtin> ");
   } else {
     printf("<lambda ");
@@ -829,9 +1005,11 @@ void print_lval_func( lval *x ){
 
 /* purpose: dispatch print based on lval type
 */
-void print_lval(lval* x) {
-  lval *a;
-  switch( x->type ) {
+void
+print_lval(lval* x)
+{
+  lval* a;
+  switch (x->type) {
     case LVAL_NUM:
       printf("%ld ", x->num);
       break;
@@ -842,17 +1020,17 @@ void print_lval(lval* x) {
       printf("[ERROR: %s] ", x->err);
       break;
     case LVAL_SEXP:
-      if( x->quoted ){
+      if (x->quoted) {
         printf("{");
       } else {
         printf("(");
       }
       a = x->first_child;
-      while( a ){
+      while (a) {
         print_lval(a);
-	a = a->sibling;
+        a = a->sibling;
       }
-      if( x->quoted ){
+      if (x->quoted) {
         printf("} ");
       } else {
         printf(") ");
@@ -865,7 +1043,7 @@ void print_lval(lval* x) {
       print_lval_func(x);
       break;
     default:
-      fucked_up("print_lval","this type can't be printed, yo!");
+      fucked_up("print_lval", "this type can't be printed, yo!");
       break;
   }
 }
@@ -876,7 +1054,9 @@ void print_lval(lval* x) {
 /* Remove and return the LL which represents a sexp from a LVAL_SEXP
 ** - should also work for QEXP
 */
-lval* sexp_extract(lval* parent) {
+lval*
+sexp_extract(lval* parent)
+{
   lval* x = parent->first_child;
   parent->first_child = NULL;
   parent->last_child = NULL;
@@ -885,16 +1065,20 @@ lval* sexp_extract(lval* parent) {
 
 /*
 */
-lval* eval_children(symbol_map* sym_env, lval* parent, err_t* err ){
-  lval *chain = sexp_extract(parent);
-  lval *x;
-  while( chain ){
+lval*
+eval_children(symbol_map* sym_env, lval* parent, err_t* err)
+{
+  lval* chain = sexp_extract(parent);
+  lval* x;
+  while (chain) {
     x = chain;
     chain = x->sibling;
-     
+
     x = eval_lval(sym_env, x, err);
-    if( err->sig ){ return lval_clean(parent,NULL,NULL); }
-    if( LVAL_ERR == x->type ){
+    if (err->sig) {
+      return lval_clean(parent, NULL, NULL);
+    }
+    if (LVAL_ERR == x->type) {
       lval_del(parent);
       return x;
     }
@@ -909,23 +1093,26 @@ lval* eval_children(symbol_map* sym_env, lval* parent, err_t* err ){
 ** v is consumed
 ** err is modified
 */
-lval* eval_sexp( symbol_map* sym_env, lval* args, err_t* err ){
+lval*
+eval_sexp(symbol_map* sym_env, lval* args, err_t* err)
+{
   args = eval_children(sym_env, args, err);
-  if( LVAL_ERR == args->type ){
+  if (LVAL_ERR == args->type) {
     return args;
   }
   lval* func = lval_pop(args);
-  
+
   /* make sure first arg is a func */
-  if( LVAL_FUN != func->type ){
+  if (LVAL_FUN != func->type) {
     lval_del(func);
     lval_del(args);
-    return lval_err("1st element of sexp list is not a func", err); /* propagate error */
+    return lval_err("1st element of sexp list is not a func",
+                    err); /* propagate error */
   }
 
   /* dispatch */
-  if( func->builtin ){
-    lval *x = func->builtin(sym_env, args, err);
+  if (func->builtin) {
+    lval* x = func->builtin(sym_env, args, err);
     lval_del(func);
     return x;
   }
@@ -935,12 +1122,14 @@ lval* eval_sexp( symbol_map* sym_env, lval* args, err_t* err ){
 
 /* dipsatch eval function based on lval type
 */
-lval* eval_lval( symbol_map* sym_env, lval* v, err_t* err ){
-  switch( v->type ) {
+lval*
+eval_lval(symbol_map* sym_env, lval* v, err_t* err)
+{
+  switch (v->type) {
     case LVAL_SYM:
       return eval_symbol(sym_env, v, err);
     case LVAL_SEXP:
-      if( v->quoted ){
+      if (v->quoted) {
         return v;
       } else {
         return eval_sexp(sym_env, v, err);
@@ -959,21 +1148,27 @@ lval* eval_lval( symbol_map* sym_env, lval* v, err_t* err ){
 
 /*
 */
-lval* dispatch_lambda(symbol_map* sym_map, lval* func, lval* args, err_t* err) {
-  lval *params = func->parameters;
-  lval *expression = func->exp;
+lval*
+dispatch_lambda(symbol_map* sym_map, lval* func, lval* args, err_t* err)
+{
+  lval* params = func->parameters;
+  lval* expression = func->exp;
   func->exp = func->parameters = NULL;
   lval_del(func);
 
   /* symbol env */
-  //TODO I am just overwriting sym_map here, why do I need to pass it at all?
+  // TODO I am just overwriting sym_map here, why do I need to pass it at all?
   sym_map = populate(SYM_MAP, params, args, err);
-  if( err->sig ){ return lval_clean(expression,NULL,NULL); } //couldn't populate
+  if (err->sig) {
+    return lval_clean(expression, NULL, NULL);
+  } // couldn't populate
 
   /* evaluate */
   lval* return_val = eval_sexp(sym_map, expression, err);
-  if( err->sig ){ return NULL; }
-  
+  if (err->sig) {
+    return NULL;
+  }
+
   /* clean up */
   sym_map_del(sym_map);
   return return_val;
@@ -984,24 +1179,28 @@ lval* dispatch_lambda(symbol_map* sym_map, lval* func, lval* args, err_t* err) {
 *******************************************************************************/
 /* Does not modify anything, merely returns a pointer
 */
-lval* sym_search( symbol_map* env, char* key ){
-  for( keyval *x = env->first_child; x; x = x->sibling ){
-    if( !strcmp(x->key, key) ){ //hit!
+lval*
+sym_search(symbol_map* env, char* key)
+{
+  for (keyval* x = env->first_child; x; x = x->sibling) {
+    if (!strcmp(x->key, key)) { // hit!
       return x->value;
     }
   }
 
   /* not in this level, search higher if possible */
-  if( env->parent ){
-    return sym_search( env->parent, key );
+  if (env->parent) {
+    return sym_search(env->parent, key);
   }
   return NULL;
 }
 
 //======================================
-lval* builtin_define(symbol_map* sym_env, lval* args, err_t* err) {
-  //TODO check preconditions
-  
+lval*
+builtin_define(symbol_map* sym_env, lval* args, err_t* err)
+{
+  // TODO check preconditions
+
   /* set up pointers */
   /*
   if( 2 != args->count ) {
@@ -1010,29 +1209,35 @@ lval* builtin_define(symbol_map* sym_env, lval* args, err_t* err) {
   */
 
   lval* one = lval_pop(args);
-  one = lval_rip(one); 
+  one = lval_rip(one);
   lval* x = lval_pop(args);
   lval_del(args);
 
   /* rip symbol */
-  if( LVAL_SYM != one->type ) {
+  if (LVAL_SYM != one->type) {
     return lval_err("eval expects 1st arg to be of type LVAL_SYM", err);
   }
   char* symbol = one->sym;
   one->sym = NULL;
   lval_del(one);
-  
+
   /* eval */
   x = eval_lval(sym_env, x, err);
-  if( err->sig ){ return lval_clean(x, NULL, NULL); } /* couldn't eval def target */
+  if (err->sig) {
+    return lval_clean(x, NULL, NULL);
+  } /* couldn't eval def target */
 
   /* push */
-  bool err_x = symbol_add(SYM_MAP, symbol, x, err); //note: adding directly to global sym_map
-  if( err_x ){
+  bool err_x = symbol_add(SYM_MAP,
+                          symbol,
+                          x,
+                          err); // note: adding directly to global sym_map
+  if (err_x) {
     return lval_err("symbol already exists", err);
   }
-  if( err->sig ){ /* werent able to make space in the sym_map on top of sym_env */
-    //try to shrink sym_map back down
+  if (err->sig) { /* werent able to make space in the sym_map on top of sym_env
+                     */
+    // try to shrink sym_map back down
     // success -> then clean up and pop back
     // error -> fatal error
     printf("TODO global symbol stack error");
@@ -1043,23 +1248,27 @@ lval* builtin_define(symbol_map* sym_env, lval* args, err_t* err) {
 }
 
 //======================================
-//FUNCTION: what you want to return is already in a list, just label it a qexp
-lval* builtin_list( symbol_map *sym_env, lval *args, err_t *err ){
+// FUNCTION: what you want to return is already in a list, just label it a qexp
+lval*
+builtin_list(symbol_map* sym_env, lval* args, err_t* err)
+{
   args->type = LVAL_SEXP;
   args->quoted = true;
   return args;
 }
 
 //======================================
-lval* builtin_head( symbol_map *sym_env, lval *args, err_t *err ){
-  //check inputs
+lval*
+builtin_head(symbol_map* sym_env, lval* args, err_t* err)
+{
+  // check inputs
   /*
   if( 1 != args->count ) {
     return lval_err("head accepts exactly 1 arg", err);
   }
   */
 
-  //TODO check arg is sexp?
+  // TODO check arg is sexp?
 
   lval* list = lval_rip(args);
   /*
@@ -1068,17 +1277,19 @@ lval* builtin_head( symbol_map *sym_env, lval *args, err_t *err ){
   }
   */
 
-  //by this point: x is qexp of size > 1 
+  // by this point: x is qexp of size > 1
   lval* head = lval_rip(list);
 
-  //preserve quoting for nested expressions
+  // preserve quoting for nested expressions
   head->quoted = true; // TODO is this right?
 
   return head;
 }
 
 //======================================
-lval* builtin_tail( symbol_map *sym_env, lval *x, err_t *err ){
+lval*
+builtin_tail(symbol_map* sym_env, lval* x, err_t* err)
+{
   /*
   //check good state
   if( 1 != args->count ) {
@@ -1091,18 +1302,20 @@ lval* builtin_tail( symbol_map *sym_env, lval *x, err_t *err ){
   }
   */
 
-  x = lval_rip(x); /* rip first arg and free the rest */
+  x = lval_rip(x);       /* rip first arg and free the rest */
   lval_del(lval_pop(x)); /* pop and discard the head */
-  return x; /* return the tail */
+  return x;              /* return the tail */
 }
 
 //======================================
-lval* builtin_join( symbol_map *sym_env, lval *args, err_t *err ){
+lval*
+builtin_join(symbol_map* sym_env, lval* args, err_t* err)
+{
   lval* master = lval_pop(args);
-  //WARNING: what if you have a element which is just the NULL value?
+  // WARNING: what if you have a element which is just the NULL value?
   // The join could end prematurely and values would be lost
-  //TODO will this be an issue?
-  for( lval *next = lval_pop(args); next; next = lval_pop(args) ){
+  // TODO will this be an issue?
+  for (lval* next = lval_pop(args); next; next = lval_pop(args)) {
     lval_join(master, next);
   }
 
@@ -1113,7 +1326,9 @@ lval* builtin_join( symbol_map *sym_env, lval *args, err_t *err ){
 /* Transfer children from slave sexp to master sexp
 ** note: the child list will be transfered in order
 */
-void lval_join(lval* master, lval* slave ){
+void
+lval_join(lval* master, lval* slave)
+{
   /* transfer chain */
   master->last_child->sibling = slave->first_child;
   master->last_child = slave->last_child;
@@ -1121,34 +1336,38 @@ void lval_join(lval* master, lval* slave ){
   /* disown chain */
   slave->first_child = NULL;
   slave->last_child = NULL;
-  
+
   /* clean up*/
   lval_del(slave);
 }
 
 //======================================
-lval* builtin_eval( symbol_map* sym_env, lval* args, err_t* err ){
-    /*
-    if( 1 != args->count ) {
-      return lval_err("eval accepts exactly 1 arg", err);
-    }
-    */
+lval*
+builtin_eval(symbol_map* sym_env, lval* args, err_t* err)
+{
+  /*
+  if( 1 != args->count ) {
+    return lval_err("eval accepts exactly 1 arg", err);
+  }
+  */
 
-    lval* input = lval_rip(args);//the rest of ARGS will be freed here
-    // TODO input = lval_pop(args); if( !sexp_empty(args) ){ lval_err(....
-    if( !(input->quoted) ) {
-      return lval_err("eval expected qexp", err);
-    }
+  lval* input = lval_rip(args); // the rest of ARGS will be freed here
+  // TODO input = lval_pop(args); if( !sexp_empty(args) ){ lval_err(....
+  if (!(input->quoted)) {
+    return lval_err("eval expected qexp", err);
+  }
 
-    input->type = LVAL_SEXP;
-    return eval_lval(sym_env, input, err);
+  input->type = LVAL_SEXP;
+  return eval_lval(sym_env, input, err);
 }
 
 /* Note checking for overflow should be the job of LISP not here at a low level
 */
-lval* builtin_sum( symbol_map *sym_env, lval *args, err_t *err ){
-  lval *x = lval_pop(args);
-  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
+lval*
+builtin_sum(symbol_map* sym_env, lval* args, err_t* err)
+{
+  lval* x = lval_pop(args);
+  for (lval* y = lval_pop(args); y; y = lval_pop(args)) {
     x->num += y->num;
 
     lval_del(y);
@@ -1160,9 +1379,11 @@ lval* builtin_sum( symbol_map *sym_env, lval *args, err_t *err ){
 
 /*
 */
-lval* builtin_minus( symbol_map *sym_env, lval *args, err_t *err ){
-  lval* x = lval_pop( args );
-  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
+lval*
+builtin_minus(symbol_map* sym_env, lval* args, err_t* err)
+{
+  lval* x = lval_pop(args);
+  for (lval* y = lval_pop(args); y; y = lval_pop(args)) {
     x->num -= y->num;
 
     lval_del(y);
@@ -1174,9 +1395,11 @@ lval* builtin_minus( symbol_map *sym_env, lval *args, err_t *err ){
 
 /*
 */
-lval* builtin_mult( symbol_map *sym_env, lval *args, err_t *err ){
-  lval* x = lval_pop( args );
-  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
+lval*
+builtin_mult(symbol_map* sym_env, lval* args, err_t* err)
+{
+  lval* x = lval_pop(args);
+  for (lval* y = lval_pop(args); y; y = lval_pop(args)) {
     x->num *= y->num;
 
     lval_del(y);
@@ -1188,9 +1411,11 @@ lval* builtin_mult( symbol_map *sym_env, lval *args, err_t *err ){
 
 /*
 */
-lval* builtin_div( symbol_map *sym_env, lval *args, err_t *err ){
-  lval* x = lval_pop( args );
-  for( lval *y = lval_pop(args); y; y = lval_pop(args) ){
+lval*
+builtin_div(symbol_map* sym_env, lval* args, err_t* err)
+{
+  lval* x = lval_pop(args);
+  for (lval* y = lval_pop(args); y; y = lval_pop(args)) {
     x->num /= y->num;
 
     lval_del(y);
@@ -1202,10 +1427,12 @@ lval* builtin_div( symbol_map *sym_env, lval *args, err_t *err ){
 
 /*
 */
-lval* builtin_lambda( symbol_map *sym_env, lval *args, err_t *err ){
+lval*
+builtin_lambda(symbol_map* sym_env, lval* args, err_t* err)
+{
   lval* parameters = lval_pop(args);
   lval* exp = lval_pop(args);
-  //TODO again, use lval_empty to check for preconditions
+  // TODO again, use lval_empty to check for preconditions
   // this will also involve making sure parameters and exp are not NULL
   lval_del(args);
   return lval_lambda(parameters, exp, err);
@@ -1213,22 +1440,25 @@ lval* builtin_lambda( symbol_map *sym_env, lval *args, err_t *err ){
 
 /* look for symbol, if value found, return a copy
 */
-lval* eval_symbol( symbol_map* sym_env, lval* x, err_t* err ){
-  char *sym = x->sym;
-  x->sym = NULL; //TODO is this right?
+lval*
+eval_symbol(symbol_map* sym_env, lval* x, err_t* err)
+{
+  char* sym = x->sym;
+  x->sym = NULL; // TODO is this right?
   lval_del(x);
 
   lval* v = sym_search(sym_env, sym);
-  if( !v ) {
-    char* err_msg = malloc((strlen("symbol [] not found") + 1 + strlen(sym)) * sizeof(char));
+  if (!v) {
+    char* err_msg =
+      malloc((strlen("symbol [] not found") + 1 + strlen(sym)) * sizeof(char));
     sprintf(err_msg, "symbol [%s] not found", sym);
     free(sym);
-    lval *a = lval_err(err_msg, err);
+    lval* a = lval_err(err_msg, err);
     free(err_msg);
     return a;
   }
   free(sym);
-  
+
   return lval_copy(v, err);
 }
 
@@ -1237,54 +1467,56 @@ lval* eval_symbol( symbol_map* sym_env, lval* x, err_t* err ){
 ********************************************************************************/
 /*
 */
-char* builtin_names[] = {"define" ,"lambda" ,"eval"
-	                ,"head" ,"tail" ,"list" ,"join"
-                        ,"+" ,"-" ,"*" ,"/"
-	                ,NULL };
+char* builtin_names[] = { "define", "lambda", "eval", "head", "tail", "list",
+                          "join",   "+",      "-",    "*",    "/",    NULL };
 
 /* dispatch builtin function based on string
 */
-builtin_fun* builtin_fun_map( char *x ){
-  if( !strcmp( "define", x ) ){
+builtin_fun*
+builtin_fun_map(char* x)
+{
+  if (!strcmp("define", x)) {
     return builtin_define;
-  } else if( !strcmp( "lambda", x ) ){
+  } else if (!strcmp("lambda", x)) {
     return builtin_lambda;
-  } else if( !strcmp( "eval", x ) ){
+  } else if (!strcmp("eval", x)) {
     return builtin_eval;
-  } else if( !strcmp( "head", x ) ){
+  } else if (!strcmp("head", x)) {
     return builtin_head;
-  } else if( !strcmp( "tail", x ) ){
+  } else if (!strcmp("tail", x)) {
     return builtin_tail;
-  } else if( !strcmp( "list", x ) ){
+  } else if (!strcmp("list", x)) {
     return builtin_list;
-  } else if( !strcmp( "join", x ) ){
+  } else if (!strcmp("join", x)) {
     return builtin_join;
-  } else if( !strcmp( "+", x ) ){
+  } else if (!strcmp("+", x)) {
     return builtin_sum;
-  } else if( !strcmp( "-", x ) ){
+  } else if (!strcmp("-", x)) {
     return builtin_minus;
-  } else if( !strcmp( "*", x ) ){
+  } else if (!strcmp("*", x)) {
     return builtin_mult;
-  } else if( !strcmp( "/", x ) ){
+  } else if (!strcmp("/", x)) {
     return builtin_div;
-  } 
+  }
 
   fucked_up("builtin_fun_map", "unrecognized string");
   return 0;
 }
-  
+
 /*
 */
-symbol_map* init_global_map( err_t* err ){
-  symbol_map *sym_map = sym_map_make(err);
-  if( err->sig ){
+symbol_map*
+init_global_map(err_t* err)
+{
+  symbol_map* sym_map = sym_map_make(err);
+  if (err->sig) {
     return NULL;
   }
 
   char* x;
-  for( size_t i = 0; (x = builtin_names[i]); i=inc_size(i) ){
+  for (size_t i = 0; (x = builtin_names[i]); i = inc_size(i)) {
     push_builtin(sym_map, x, err);
-    if( err->sig ){
+    if (err->sig) {
       sym_map_del(sym_map);
       return NULL;
     }
@@ -1295,15 +1527,17 @@ symbol_map* init_global_map( err_t* err ){
 
 /*
 */
-void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
+void
+push_builtin(symbol_map* sym_map, char* fun_name, err_t* err)
+{
   char* funx = strdup(fun_name, err);
-  if( err->sig ){
+  if (err->sig) {
     free(funx);
     return;
   }
 
   lval* xx = lval_builtin(builtin_fun_map(fun_name), err);
-  if( err->sig ){
+  if (err->sig) {
     free(funx);
     lval_del(xx);
     return;
@@ -1315,21 +1549,25 @@ void push_builtin(symbol_map* sym_map, char* fun_name, err_t* err) {
 /* note: this is the correct interface function to use (not `kv_push`)
 ** consumes: symbol, value
 */
-bool symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err) {
-  //make sure there is something in the symbol_map before you being searching
-  if( sym_map && sym_search(sym_map, symbol) ){
+bool
+symbol_add(symbol_map* sym_map, char* symbol, lval* value, err_t* err)
+{
+  // make sure there is something in the symbol_map before you being searching
+  if (sym_map && sym_search(sym_map, symbol)) {
     return true;
   }
 
-  kv_push( sym_map, symbol, value, err);
+  kv_push(sym_map, symbol, value, err);
   return false;
 }
 
 /* note: this will delete kv-chain but not parent
 */
-void sym_map_del( symbol_map* sym_map ){
+void
+sym_map_del(symbol_map* sym_map)
+{
   keyval *a, *x = sym_map->first_child;
-  while( x ){
+  while (x) {
     a = x->sibling;
     free(x->key);
     lval_del(x->value);
@@ -1342,11 +1580,13 @@ void sym_map_del( symbol_map* sym_map ){
 
 /*
 */
-symbol_map* sym_map_make(err_t* err) {
+symbol_map*
+sym_map_make(err_t* err)
+{
   symbol_map* sym_map = malloc(sizeof(symbol_map));
-  if( !sym_map ){
-   err->sig = OUT_OF_MEM;
-   return NULL;
+  if (!sym_map) {
+    err->sig = OUT_OF_MEM;
+    return NULL;
   }
 
   sym_map->first_child = sym_map->last_child = NULL;
@@ -1356,12 +1596,17 @@ symbol_map* sym_map_make(err_t* err) {
 
 /*
 */
-symbol_map* populate_rest( symbol_map *sym_map, lval *parameters, lval *args, err_t *err ){
-  char *sym = rip_sym(lval_rip(parameters));
-  args->quoted = true; //TODO should this be higher up the chain?
+symbol_map*
+populate_rest(symbol_map* sym_map, lval* parameters, lval* args, err_t* err)
+{
+  char* sym = rip_sym(lval_rip(parameters));
+  args->quoted = true; // TODO should this be higher up the chain?
 
   kv_push(sym_map, sym, args, err);
-  if( err->sig ){ puts("pop sym env"); exit(1); }
+  if (err->sig) {
+    puts("pop sym env");
+    exit(1);
+  }
   return sym_map;
 }
 
@@ -1373,32 +1618,37 @@ symbol_map* populate_rest( symbol_map *sym_map, lval *parameters, lval *args, er
 ** consumes parameters
 ** consumes args
 */
-symbol_map* populate( symbol_map *parent, lval *parameters, lval *args, err_t *err ){
+symbol_map*
+populate(symbol_map* parent, lval* parameters, lval* args, err_t* err)
+{
   /* create blank slate; */
   symbol_map* sym_map = sym_map_make(err);
-  if( err->sig ){ 
-    lval_clean( args, parameters, NULL );
+  if (err->sig) {
+    lval_clean(args, parameters, NULL);
     return NULL;
   }
   sym_map->parent = parent;
 
   /* populate */
-  char *sym;
-  for( lval *a = lval_pop(parameters); a; a = lval_pop(parameters) ){
+  char* sym;
+  for (lval* a = lval_pop(parameters); a; a = lval_pop(parameters)) {
     sym = rip_sym(a);
 
     /* handle variable arguments */
-    if( !strcmp(sym,"&") ){
-      free(sym);//discard
-      return populate_rest(sym_map,parameters,args,err);
+    if (!strcmp(sym, "&")) {
+      free(sym); // discard
+      return populate_rest(sym_map, parameters, args, err);
     }
-   
+
     kv_push(sym_map, sym, lval_pop(args), err);
-    if( err->sig ){ puts("pop sym env"); exit(1); }
+    if (err->sig) {
+      puts("pop sym env");
+      exit(1);
+    }
   }
 
   /* clean, push, return */
-  lval_clean( args, parameters, NULL );
+  lval_clean(args, parameters, NULL);
   return sym_map;
 }
 
@@ -1407,10 +1657,12 @@ symbol_map* populate( symbol_map *parent, lval *parameters, lval *args, err_t *e
 ** modifies sym_map
 ** modifies error
 */
-void kv_push(symbol_map* sym_map, char* key, lval* value, err_t* err) {
+void
+kv_push(symbol_map* sym_map, char* key, lval* value, err_t* err)
+{
   /* allocate space */
-  keyval *kv = malloc(sizeof(keyval));
-  if( !kv ){
+  keyval* kv = malloc(sizeof(keyval));
+  if (!kv) {
     free(key);
     lval_del(value);
     err->sig = OUT_OF_MEM;
@@ -1423,7 +1675,7 @@ void kv_push(symbol_map* sym_map, char* key, lval* value, err_t* err) {
   kv->sibling = NULL;
 
   /* append */
-  if( !(sym_map->first_child) ){
+  if (!(sym_map->first_child)) {
     sym_map->first_child = kv;
     sym_map->last_child = kv;
   } else {
@@ -1435,17 +1687,21 @@ void kv_push(symbol_map* sym_map, char* key, lval* value, err_t* err) {
 /******************************************************************************
 * GRAVEYARD
 ******************************************************************************/
-void print_chain( lval* chain ){
+void
+print_chain(lval* chain)
+{
   puts("printing chain: ");
-  while( chain ){
+  while (chain) {
     print_lval(chain);
     chain = chain->sibling;
   }
   puts("chain**");
 }
 
-char* lval_type_string(lval* v ) {
-  switch(v->type) {
+char*
+lval_type_string(lval* v)
+{
+  switch (v->type) {
     case LVAL_NUM:
       return "num";
     case LVAL_FUN:
@@ -1459,6 +1715,6 @@ char* lval_type_string(lval* v ) {
     case LVAL_UNDEF:
       return "undef";
   }
-  
+
   return "UNKNOWN TYPE";
 }

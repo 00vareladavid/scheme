@@ -1,0 +1,3 @@
+#!/usr/bin/env dash
+clang-format -style=Mozilla parsing.c > temp.c
+[ 0 = "$?" ] && mv temp.c parsing.c

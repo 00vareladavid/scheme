@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env dash
 
 copts="-std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow"
 #TODO remove these flags once you finish reimplementing builtin functions"
