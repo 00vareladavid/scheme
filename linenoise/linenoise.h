@@ -38,6 +38,7 @@
 
 #ifndef __LINENOISE_H
 #define __LINENOISE_H
+#include <stddef.h> /* Added by 00vareladavid */
 
 #ifdef __cplusplus
 extern "C" {
