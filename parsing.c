@@ -293,7 +293,7 @@ char* strdup(char* input, err_t* err) {
 /*
 */
 symbol_map* SYM_MAP;
-lval* EMPTY_LIST;
+static lval* EMPTY_LIST;
 
 /********************************************************************************
 * MAIN
@@ -301,7 +301,6 @@ lval* EMPTY_LIST;
 int main(int argc, char* argv[]) {
   /*** INIT ***/
   /* TODO make sure this is not null and it is never changed */
-  EMPTY_LIST = malloc(sizeof(lval));
 
   /* error struct */
   err_t* err = malloc(sizeof(err_t));
@@ -345,7 +344,6 @@ int main(int argc, char* argv[]) {
 
   /*** CLEAN ***/
   free(err);
-  free(EMPTY_LIST);
   mpc_cleanup(5, Number, Symbol, List, Expr, Lispy);
   sym_map_del(SYM_MAP);
   return 0;
