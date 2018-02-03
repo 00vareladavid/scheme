@@ -113,7 +113,7 @@ struct lval_t {
 
   int64_t num; /* num */
   char* err;   /* err */
-  char* sym;   /* symbol */
+  char* identifier;   /* symbol */
 
   /* boolean */
   bool is_true;
@@ -452,7 +452,7 @@ lval_t* lval_sym(char* sym_string, err_t* err) {
   }
 
   v->type = LVAL_SYM;
-  v->sym = strdup(sym_string, err);
+  v->identifier = strdup(sym_string, err);
   if (err->sig) {
     return lval_clean(v, NULL, NULL);
   }
@@ -507,8 +507,8 @@ lval_t* lval_lambda(lval_t* parameters, lval_t* exp, err_t* err) {
 /*
 */
 char* rip_sym(lval_t* v) {
-  char* x = v->sym;
-  v->sym = NULL;
+  char* x = v->identifier;
+  v->identifier = NULL;
   lval_del(v);
   return x;
 }
@@ -555,7 +555,7 @@ void lval_del(lval_t* v) {
       free(v->err);
       break;
     case LVAL_SYM:
-      free(v->sym);
+      free(v->identifier);
       break;
     case LVAL_PAIR:
       lval_del(v->car);
@@ -644,7 +644,7 @@ lval_t* lval_copy(lval_t* v, err_t* err) {
     case LVAL_PROC:
       return lval_copy_func(v, err);
     case LVAL_SYM:
-      return lval_sym(v->sym, err);
+      return lval_sym(v->identifier, err);
     case LVAL_PAIR:
       return lval_copy_pair(v, err);
     default:
@@ -824,7 +824,7 @@ void print_lval(lval_t* x) {
       }
       break;
     case LVAL_SYM:
-      printf("%s ", x->sym);
+      printf("%s ", x->identifier);
       break;
     case LVAL_ERR:
       printf("[ERROR: %s] ", x->err);
@@ -870,7 +870,7 @@ lval_t* eval_children(sym_env_t* sym_env, lval_t* parent, err_t* err) {
 lval_t* eval_pair(sym_env_t* sym_env, lval_t* args, err_t* err) {
   /* binding constructs and definitions and special procedures? */
   if (LVAL_SYM == args->car->type) {
-    char* first_sym = args->car->sym;
+    char* first_sym = args->car->identifier;
     if (!strcmp("quote", first_sym)) {
       lval_del(l_pop(&args));  // remove id
       return builtin_quote(sym_env, args, err);
@@ -1589,7 +1589,7 @@ lval_t* proc_pred_eqv(sym_env_t* sym_map, lval_t* args, err_t* err) {
       x = (a->is_true == b->is_true);
       break;
     case LVAL_SYM:
-      x = !strcmp(a->sym, b->sym);
+      x = !strcmp(a->identifier, b->identifier);
       break;
     case LVAL_NUM:
       x = (a->num == b->num);
