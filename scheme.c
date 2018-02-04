@@ -105,32 +105,37 @@ enum lval_type_t {
 };
 typedef enum lval_type_t lval_type_t;
 
+struct pair_t {
+  lval_t* car;
+  lval_t* cdr;
+};
+typedef struct pair_t pair_t;
+
+struct procedure_t {
+  /* - builtin */
+  builtin_fun* builtin;
+  /* - lambda */
+  lval_t* parameters;
+  lval_t* exp;
+};
+typedef struct procedure_t procedure_t;
+
 /*
 */
 struct lval_t {
   lval_type_t type;
   bool quoted;
 
-  int64_t num;      /* num */
-  char* err;        /* err */
-  char* identifier; /* symbol */
+  union {
+    int64_t num;      /* num */
+    bool is_true;     /* boolean */
+    char* identifier; /* symbol */
+    pair_t pair;      /* pair */
+    procedure_t proc;
 
-  /* boolean */
-  bool is_true;
-
-  /* functions */
-
-  /* - builtin */
-  builtin_fun* builtin;
-  /* - lambda */
-  lval_t* parameters;
-  lval_t* exp;
-
-  /* pair */
-  lval_t* car;
-  lval_t* cdr;
+    char* err;        /* err */
+  };
 };
-typedef struct lval_t lval_t;
 
 /********************************************************************************
 * PROTOTYPES
@@ -276,6 +281,8 @@ void skip_trash(void) {
   }
 }
 
+/*
+*/
 lval_t* parse_bool(char* tok, err_t* err) {
   lval_t* x;
   if ('t' == tok[0]) {
@@ -327,9 +334,9 @@ lval_t* parse_list(err_t* err) {
       x = root; /* update current spot */
     } else {
       /* append new pair to current spot*/
-      x->cdr = lval_pair(next_child, NIL, err);
+      x->pair.cdr = lval_pair(next_child, NIL, err);
       /* update current spot */
-      x = x->cdr;
+      x = x->pair.cdr;
     }
   }
 
@@ -513,8 +520,8 @@ lval_t* lval_pair(lval_t* car, lval_t* cdr, err_t* err) {
   }
 
   v->type = LVAL_PAIR;
-  v->car = car;
-  v->cdr = cdr;
+  v->pair.car = car;
+  v->pair.cdr = cdr;
   return v;
 }
 
@@ -600,7 +607,7 @@ lval_t* lval_builtin(builtin_fun* fun, err_t* err) {
   }
 
   v->type = LVAL_PROC;
-  v->builtin = fun;
+  v->proc.builtin = fun;
   return v;
 }
 
@@ -625,10 +632,10 @@ lval_t* lval_lambda(lval_t* parameters, lval_t* exp, err_t* err) {
   }
 
   x->type = LVAL_PROC;
-  x->builtin = NULL;
-  x->parameters = parameters;
-  x->exp = exp;
-  x->exp->quoted = false;  // WARNING removing the quoting
+  x->proc.builtin = NULL;
+  x->proc.parameters = parameters;
+  x->proc.exp = exp;
+  x->proc.exp->quoted = false;  // WARNING removing the quoting
   return x;
 }
 
@@ -657,9 +664,9 @@ lval_type_t rip_type(lval_t* v) {
 */
 void lval_del_func(lval_t* v) {
   /* if a lambda expression */
-  if (!(v->builtin)) {
-    lval_del(v->exp);
-    lval_del(v->parameters);
+  if (!(v->proc.builtin)) {
+    lval_del(v->proc.exp);
+    lval_del(v->proc.parameters);
   }
 
   /* nothing to delete for builtin functions */
@@ -690,8 +697,8 @@ void lval_del(lval_t* v) {
       free(v->identifier);
       break;
     case LVAL_PAIR:
-      lval_del(v->car);
-      lval_del(v->cdr);
+      lval_del(v->pair.car);
+      lval_del(v->pair.cdr);
       break;
     case LVAL_PROC:
       lval_del_func(v);
@@ -720,11 +727,11 @@ lval_t* lval_clean(lval_t* a, lval_t* b, lval_t* c) {
 /* copy a lambda expression
 */
 lval_t* copy_lambda(lval_t* src, err_t* err) {
-  lval_t* a = lval_copy(src->parameters, err);
+  lval_t* a = lval_copy(src->proc.parameters, err);
   if (err->sig) {
     return NULL;
   }
-  lval_t* b = lval_copy(src->exp, err);
+  lval_t* b = lval_copy(src->proc.exp, err);
   if (err->sig) {
     return lval_clean(a, NULL, NULL);
   }
@@ -738,8 +745,8 @@ lval_t* copy_lambda(lval_t* src, err_t* err) {
 /*
 */
 lval_t* lval_copy_func(lval_t* v, err_t* err) {
-  if (v->builtin) {
-    return lval_builtin(v->builtin, err);
+  if (v->proc.builtin) {
+    return lval_builtin(v->proc.builtin, err);
   }
 
   return copy_lambda(v, err);
@@ -748,12 +755,12 @@ lval_t* lval_copy_func(lval_t* v, err_t* err) {
 /* NOTE: this is a deep copy
 */
 lval_t* lval_copy_pair(lval_t* src, err_t* err) {
-  lval_t* car = lval_copy(src->car, err);
+  lval_t* car = lval_copy(src->pair.car, err);
   lval_t* dest;
-  if (NIL == src->cdr) {
+  if (NIL == src->pair.cdr) {
     dest = lval_pair(car, NIL, err);
   } else {
-    lval_t* cdr = lval_copy(src->cdr, err);
+    lval_t* cdr = lval_copy(src->pair.cdr, err);
     dest = lval_pair(car, cdr, err);
   }
   return dest;
@@ -795,8 +802,8 @@ lval_t* l_rip(lval_t* pair) {
     return NULL;  // this is just a signal that means nothing more to return
   }
 
-  lval_t* x = pair->car;
-  pair->car = NULL;
+  lval_t* x = pair->pair.car;
+  pair->pair.car = NULL;
   lval_del(pair);
   return x;
 }
@@ -809,9 +816,9 @@ lval_t* l_pop(lval_t** pair) {
   }
 
   lval_t* base = *pair;
-  lval_t* x = base->car;
-  (*pair) = base->cdr;
-  base->car = base->cdr = NULL;  // cut pointers
+  lval_t* x = base->pair.car;
+  (*pair) = base->pair.cdr;
+  base->pair.car = base->pair.cdr = NULL;  // cut pointers
   lval_del(base);
   return x;
 }
@@ -829,12 +836,12 @@ void print(lval_t* x) {
 /*
 */
 void print_lval_func(lval_t* x) {
-  if (x->builtin) {
+  if (x->proc.builtin) {
     printf("<builtin> ");
   } else {
     printf("<lambda ");
-    print_lval(x->parameters);
-    print_lval(x->exp);
+    print_lval(x->proc.parameters);
+    print_lval(x->proc.exp);
     printf("> ");
   }
 }
@@ -867,9 +874,9 @@ void print_lval(lval_t* x) {
       break;
     case LVAL_PAIR:
       printf("(");
-      print_lval(x->car);
-      for (a = x->cdr; NIL != a; a = a->cdr) {
-        print_lval(a->car);
+      print_lval(x->pair.car);
+      for (a = x->pair.cdr; NIL != a; a = a->pair.cdr) {
+        print_lval(a->pair.car);
       }
       printf(") ");
       break;
@@ -894,8 +901,8 @@ void print_lval(lval_t* x) {
 /*
 */
 lval_t* eval_children(sym_env_t* sym_env, lval_t* parent, err_t* err) {
-  for (lval_t* x = parent; NIL != x; x = x->cdr) {
-    x->car = eval_lval(sym_env, x->car, err);
+  for (lval_t* x = parent; NIL != x; x = x->pair.cdr) {
+    x->pair.car = eval_lval(sym_env, x->pair.car, err);
   }
 
   return parent;
@@ -905,8 +912,8 @@ lval_t* eval_children(sym_env_t* sym_env, lval_t* parent, err_t* err) {
 */
 lval_t* eval_pair(sym_env_t* sym_env, lval_t* args, err_t* err) {
   /* binding constructs and definitions and special procedures? */
-  if (LVAL_SYM == args->car->type) {
-    char* first_sym = args->car->identifier;
+  if (LVAL_SYM == args->pair.car->type) {
+    char* first_sym = args->pair.car->identifier;
     if (!strcmp("quote", first_sym)) {
       lval_del(l_pop(&args));  // remove id
       return builtin_quote(sym_env, args, err);
@@ -941,8 +948,8 @@ lval_t* eval_pair(sym_env_t* sym_env, lval_t* args, err_t* err) {
   }
 
   /* dispatch */
-  if (func->builtin) {
-    lval_t* x = func->builtin(sym_env, args, err);
+  if (func->proc.builtin) {
+    lval_t* x = func->proc.builtin(sym_env, args, err);
     lval_del(func);
     return x;
   }
@@ -983,9 +990,9 @@ lval_t* dispatch_lambda(sym_env_t* sym_map,
                         lval_t* func,
                         lval_t* args,
                         err_t* err) {
-  lval_t* params = func->parameters;
-  lval_t* expression = func->exp;
-  func->exp = func->parameters = NULL;
+  lval_t* params = func->proc.parameters;
+  lval_t* expression = func->proc.exp;
+  func->proc.exp = func->proc.parameters = NULL;
   lval_del(func);
 
   /* symbol env */
@@ -1634,7 +1641,7 @@ lval_t* proc_pred_eqv(sym_env_t* sym_map, lval_t* args, err_t* err) {
       x = (a == b);
       break;
     case LVAL_PROC:
-      x = (a->builtin == b->builtin);
+      x = (a->proc.builtin == b->proc.builtin);
       break;
     default:
       fucked_up("proc_pred_eqv", "type is not recognized yo");
@@ -1665,7 +1672,7 @@ lval_t* proc_car(sym_env_t* sym_env, lval_t* args, err_t* err) {
   lval_t* x = scm_rip_one_arg(args);
   scm_expect_type(LVAL_PAIR, x);
 
-  return x->car;
+  return x->pair.car;
 }
 
 /*
