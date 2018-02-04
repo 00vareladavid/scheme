@@ -1,4 +1,6 @@
 *.swp
-parsing
+scheme
+err.ascii
 memlog.txt
 *.o
+shellcheck-latest

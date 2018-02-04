@@ -2,6 +2,7 @@
 
 c_file="scheme.c"
 x_file="scheme"
+err_file="err.ascii"
 
 memcheck() {
   valgrind --tool=memcheck \
@@ -11,16 +12,27 @@ memcheck() {
            --track-fds=yes \
   	   --track-origins=yes \
            --log-file=memlog.txt \
-           "${x_file}" 
+           "./${x_file}" 
 }
 
 build () {
+  other_opts="-fdiagnostics-color=always"
   copts="-std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow"
   #TODO remove these flags once you finish reimplementing builtin functions"
   passes="-Wno-unused-parameter"
+  input_files="${c_file} linenoise/linenoise.o mpc/mpc.o"
   
   nix-shell -p gcc binutils \
-            --command "gcc -g ${copts} ${passes} ${c_file} linenoise/linenoise.o mpc/mpc.o -lm -o ${x_file}"
+            --command "gcc -g ${other_opts} ${copts} ${passes} ${input_files} -lm -o ${x_file}" \
+    >"$err_file" 2>&1 
+}
+
+run () {
+  if build; then
+    memcheck
+  else
+    less -r "$err_file"
+  fi
 }
 
 format () {
@@ -36,6 +48,6 @@ case "$@" in
   memcheck) memcheck;;
   build) build;;
   format) format;;
+  run) run;;
   *) usage;;
 esac
-

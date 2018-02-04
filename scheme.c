@@ -111,9 +111,9 @@ struct lval_t {
   lval_type_t type;
   bool quoted;
 
-  int64_t num; /* num */
-  char* err;   /* err */
-  char* identifier;   /* symbol */
+  int64_t num;      /* num */
+  char* err;        /* err */
+  char* identifier; /* symbol */
 
   /* boolean */
   bool is_true;
@@ -135,18 +135,23 @@ typedef struct lval_t lval_t;
 /********************************************************************************
 * PROTOTYPES
 ********************************************************************************/
+// parser
+lval_t* my_parse(err_t* err);
+
 // debugging
 char* lval_type_string(lval_type_t);
 
 // main
 char* prompt(void);
-void repl(mpc_parser_t* Lispy, sym_env_t* sym_env, err_t* err);
+void repl(sym_env_t* sym_env, err_t* err);
 
 // constructors
 lval_t* lval_special(err_t* err);
 lval_t* lval_num(int64_t x, err_t* err);
+lval_t* lval_bool(bool x, err_t* err);
 lval_t* lval_err(char* err_msg, err_t* err);
 lval_t* lval_sym(char* sym_string, err_t* err);
+lval_t* lval_pair(lval_t* car, lval_t* cdr, err_t* err);
 lval_t* lval_undef(err_t* err);
 lval_t* lval_lambda(lval_t* parameters, lval_t* exp, err_t* err);
 
@@ -240,6 +245,164 @@ char* strdup(char* input, err_t* err) {
 sym_env_t* SYM_MAP;
 static lval_t* NIL;
 
+/******************
+* PARSER
+******************/
+char* INPUT;
+
+bool whitespace_char(char x) {
+  return (x == ' ') || (x == '\n');
+}
+
+bool delimiting_char(char x) {
+  return (x == ' ') || (x == '\n') || (x == '(') || (x == ')') || (x == '\0');
+}
+
+/* skip whitespace and comments
+*/
+void skip_trash(void) {
+  /* skip whitespace */
+  while (*INPUT && whitespace_char(*INPUT)) {
+    ++INPUT;
+  }
+
+  /* skip comments */
+  if (';' == *INPUT) {
+    ++INPUT;
+    while (*INPUT && ('\n' != *INPUT)) {
+      ++INPUT;
+    }
+    skip_trash();
+  }
+}
+
+lval_t* parse_bool(char* tok, err_t* err) {
+  lval_t* x;
+  if ('t' == tok[0]) {
+    x = lval_bool(true, NULL);
+  } else if ('f' == tok[0]) {
+    x = lval_bool(false, NULL);
+  } else {
+    puts("1 unknown reader macro");
+    exit(1);
+  }
+
+  if ((tok + 1) != INPUT) {
+    puts("2 unknown reader macro");
+    exit(1);
+  }
+
+  return x;
+}
+
+lval_t* parse_sym(char* tok, err_t* err) {
+  size_t diff = INPUT - tok;
+  char* x = malloc(sizeof(char) * (diff + 1));
+  memcpy(x, tok, diff);
+  x[diff] = '\0';
+  lval_t* v = lval_sym(x, err);
+  free(x);
+  return v;
+}
+
+lval_t* parse_num(char* tok, err_t* err) {
+  errno = 0;
+  char* end;
+  int64_t num = strtol(tok, &end, 10);
+  if (errno == ERANGE) {
+    return lval_err("number out of range", NULL);
+  }
+
+  return lval_num(num, err);
+}
+
+lval_t* parse_list(err_t* err) {
+  lval_t* root = NIL;
+  lval_t* x = NULL;
+  for (lval_t* next_child = my_parse(err); next_child;
+       next_child = my_parse(err)) {
+    if (NIL == root) {
+      /* root is now a pair, not an empty_list */
+      root = lval_pair(next_child, NIL, err);
+      x = root; /* update current spot */
+    } else {
+      /* append new pair to current spot*/
+      x->cdr = lval_pair(next_child, NIL, err);
+      /* update current spot */
+      x = x->cdr;
+    }
+  }
+
+  return root;
+}
+
+lval_t* parse_token(char* tok, err_t* err) {
+  switch (tok[0]) {
+    case '0':
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+    case '8':
+    case '9':
+      return parse_num(tok, err);
+    case '+':
+    case '-':
+      if (INPUT == tok + 1) {
+        return parse_sym(tok, err);
+      } else {
+        return parse_num(tok, err);
+      }
+    case '#':
+      return parse_bool(tok + 1, err);
+    case '(':
+      return parse_list(err);
+    case ')':
+      return NULL;
+    default: /* has to be and identfier */
+      return parse_sym(tok, err);
+  }
+
+  return NULL;  // just for the compiler
+}
+
+void delimit_tok(char* tok) {
+  /* single char tokens will be delimited by anything */
+  if ('(' == *tok || ')' == *tok) {
+    ++INPUT;
+    return;
+  }
+
+  /* otherwise */
+  for (++INPUT; !delimiting_char(INPUT[0]); ++INPUT) {
+  }
+}
+
+lval_t* my_parse(err_t* err) {
+  /* skip trash */
+  skip_trash();
+
+  /* delimit token */
+  char* tok = INPUT;
+  delimit_tok(tok);
+
+  /* parse into an lval_t* */
+  return parse_token(tok, err);
+
+  // TODO root of lvals should be a BEGIN and you should keep reading
+  // until you hit a EOF
+}
+
+lval_t* start_parse(char* input, err_t* err) {
+  INPUT = input;
+  lval_t* x = my_parse(err);
+  free(input);
+  return x;
+}
+
 /********************************************************************************
 * MAIN
 ********************************************************************************/
@@ -264,33 +427,15 @@ int main(int argc, char* argv[]) {
   }
   sym_env_t* sym_env = SYM_MAP;  // dirty hack to satisfy type system for now
 
-  /* parser */
-  mpc_parser_t* Number = mpc_new("number");
-  mpc_parser_t* Symbol = mpc_new("symbol");
-  mpc_parser_t* List = mpc_new("list");
-  mpc_parser_t* Expr = mpc_new("expr");
-  mpc_parser_t* Lispy = mpc_new("lispy");
-
-  mpca_lang(MPCA_LANG_DEFAULT,
-            " \
-       number : /-?[0-9]+/ ;\
-       symbol : '+' | '-' | '*' | '/' | /[a-zA-Z0-0_&#?!]+/ ;\
-       list : '(' <expr>* ')' ;\
-       expr : <number> | <symbol> | <list> ;\
-       lispy : /^/ <expr>+ /$/ ;\
-     ",
-            Number, Symbol, List, Expr, Lispy);
-
   /*** LOAD STDLIB ***/
   // stdlib(sym_env, err);
 
   /*** REPL ***/
-  repl(Lispy, sym_env, err);
+  repl(sym_env, err);
 
   /*** CLEAN ***/
   free(err);
   free(NIL);
-  mpc_cleanup(5, Number, Symbol, List, Expr, Lispy);
   sym_map_del(SYM_MAP);
   return 0;
 }
@@ -298,41 +443,28 @@ int main(int argc, char* argv[]) {
 /*******************************************************************************
 * Standard Library
 *******************************************************************************/
-lval_t* lisp_exec(mpc_parser_t* Lispy,
-                  sym_env_t* sym_env,
-                  char* input,
-                  err_t* err) {
-  lval_t* x = NULL;
-  mpc_result_t r; /* holds the ast */
-  if (mpc_parse("<stdin>", input, Lispy, &r)) {
-    /* read */
-    x = lisp_read(r.output, err);
-    if (err->sig) {
-      printf("[ERR] Unable to READ lval_t due to insufficient memory\n");
-      return lval_clean(x, NULL, NULL);
-    }
-
-    /* eval */
-    x = eval_lval(sym_env, x, err);
-    if (err->sig) {
-      printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
-      return lval_clean(x, NULL, NULL);
-    }
-  } else {
-    /* bad parse */
-    puts("Bad Parse:");
-    err->sig = BAD_PARSE;
-    mpc_err_print(r.error);
-    mpc_err_delete(r.error);
+lval_t* lisp_exec(sym_env_t* sym_env, char* input, err_t* err) {
+  /* read */
+  lval_t* x = start_parse(input, err);
+  // TODO check for bad parse
+  if (err->sig) {
+    printf("[ERR] Unable to READ lval_t due to insufficient memory\n");
+    return lval_clean(x, NULL, NULL);
   }
 
-  free(input);
+  /* eval */
+  x = eval_lval(sym_env, x, err);
+  if (err->sig) {
+    printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
+    return lval_clean(x, NULL, NULL);
+  }
+
   return x;
 }
 
 void stdlib(mpc_parser_t* Lispy, sym_env_t* sym_env, err_t* err) {
   // char** code = ["(define {fun} (lambda {args body} {define (head args)
-  // lisp_exec(Lispy, sym_env,
+  // lisp_exec(sym_env,
 }
 
 /*******************************************************************************
@@ -350,15 +482,14 @@ char* prompt(void) {
 
 /*
 */
-void repl(mpc_parser_t* Lispy, sym_env_t* sym_env, err_t* err) {
-  puts("Lispy v0.1.0");
+void repl(sym_env_t* sym_env, err_t* err) {
+  puts("Scheme v0.1.0");
   puts("Enter 'EXIT' to exit");
 
-  // mpc_result_t r; /* holds the ast */
   lval_t* x;
   char* input = prompt();
   while (strcmp(input, "QUIT")) {
-    x = lisp_exec(Lispy, sym_env, input, err);
+    x = lisp_exec(sym_env, input, err);
     /* if error: reset signal and skip printing */
     if (err->sig) {  // TODO I am throwing all kinds of errors together,
                      // seperate them
@@ -541,6 +672,7 @@ void lval_del(lval_t* v) {
   if (!v) {
     return;
   }
+
   if (NIL == v) {
     return;
   }
@@ -654,31 +786,8 @@ lval_t* lval_copy(lval_t* v, err_t* err) {
 }
 
 /********************************************************************************
-* READING
+* UTILS
 ********************************************************************************/
-/*
-*/
-typedef enum ast_tag_t {
-  UNRECOGNIZED_TAG,
-  NUMBER_TAG,
-  SYMBOL_TAG,
-  LIST_TAG,
-  TOPLEVEL_TAG,
-} ast_tag_t;
-ast_tag_t tag_map(char* tag) {
-  if (strstr(tag, "number")) {
-    return NUMBER_TAG;
-  } else if (strstr(tag, "symbol")) {
-    return SYMBOL_TAG;
-  } else if (strstr(tag, "list")) {
-    return LIST_TAG;
-  } else if (!strcmp(tag, ">")) {
-    return TOPLEVEL_TAG;
-  }
-
-  return UNRECOGNIZED_TAG;
-}
-
 /*
 */
 lval_t* l_rip(lval_t* pair) {
@@ -707,84 +816,6 @@ lval_t* l_pop(lval_t** pair) {
   return x;
 }
 
-/* If read unsuccessful, will clean up ENTIRE parent tree
-** ast is only read
-*/
-lval_t* read_children(lval_t* root, mpc_ast_t* t, err_t* err) {
-  lval_t* x = root;
-  lval_t* next_child;
-  size_t count = t->children_num;
-  for (size_t i = 0; i < count; i = inc_size(i)) {
-    /* if not a bracket, then it is a child value */
-    if (strcmp(t->children[i]->tag, "regex") &&
-        strncmp(t->children[i]->contents, "(", 1) &&
-        strncmp(t->children[i]->contents, ")", 1)) {
-      next_child = read_lval(t->children[i], err);
-      if (NIL == x) {
-        /* root is now a pair, not an empty_list */
-        root = lval_pair(next_child, NIL, err);
-        x = root; /* update current spot */
-      } else {
-        /* append new pair to current spot*/
-        x->cdr = lval_pair(next_child, NIL, err);
-        if (err->sig) {
-          exit(1);
-        }
-        /* update current spot */
-        x = x->cdr;
-      }
-    }
-  }
-  return root;
-}
-
-/*
-*/
-lval_t* read_lval_list(mpc_ast_t* t, err_t* err) {
-  lval_t* x = NIL;
-  return read_children(x, t, err);
-}
-
-/*
-*/
-lval_t* lisp_read(mpc_ast_t* t, err_t* err) {
-  lval_t* x = read_lval(t, err);  // propagate error
-  mpc_ast_delete(t);              // clean up
-  return x;                       // propage error
-}
-
-/* purpose: dispatch reader function based on ast tag
-*/
-lval_t* read_lval(mpc_ast_t* t, err_t* err) {
-  ast_tag_t tag = tag_map(t->tag);
-
-  switch (tag) {
-    case NUMBER_TAG:
-      return read_num(t, err);
-    case SYMBOL_TAG:
-      return lval_sym(t->contents, err);
-    case LIST_TAG:
-      return read_lval_list(t, err);
-    case TOPLEVEL_TAG:
-      return read_lval(t->children[1], err);
-    default:
-      printf("ERROR unrecognized tag");
-      exit(1);
-  }
-}
-
-/*
-*/
-lval_t* read_num(mpc_ast_t* t, err_t* err) {
-  errno = 0;
-  int64_t num = strtol(t->contents, NULL, 10);
-  if (errno == ERANGE) {
-    return lval_err("number out of range", err);
-  }
-
-  return lval_num(num, err);
-}
-
 /********************************************************************************
 * PRINT
 ********************************************************************************/
@@ -811,6 +842,11 @@ void print_lval_func(lval_t* x) {
 /* purpose: dispatch print based on lval type
 */
 void print_lval(lval_t* x) {
+  /* TODO this is nonly here so I don't get segmentation fuaults right now */
+  if (!x) {
+    return;
+  }
+
   lval_t* a;
   switch (x->type) {
     case LVAL_NUM:
