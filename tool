@@ -30,6 +30,7 @@ build () {
 run () {
   if build; then
     memcheck
+    less memlog.txt
   else
     less -r "$err_file"
   fi
