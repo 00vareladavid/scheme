@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /********************************************************************************
 * UTILS
@@ -133,6 +135,9 @@ struct lval_t {
 /********************************************************************************
 * PROTOTYPES
 ********************************************************************************/
+static unsigned char* read_whole_file(const char* file_name);
+void scheme_stdlib(sym_env_t* sym_env, err_t* err);
+
 // parser
 lval_t* my_parse(err_t* err);
 
@@ -184,6 +189,7 @@ lval_t* dispatch_lambda(sym_env_t*, lval_t* func, lval_t* args, err_t* err);
 
 /* most complex builtins, require all three args */
 lval_t* builtin_define(sym_env_t* sym_env, lval_t* args, err_t* err);
+lval_t* proc_begin(sym_env_t* sym_env, lval_t* args, err_t* err);
 lval_t* builtin_set(sym_env_t* sym_env, lval_t* args, err_t* err);
 lval_t* builtin_eval(sym_env_t* sym_env, lval_t* args, err_t* err);
 
@@ -303,9 +309,11 @@ void decRef(lval_t* x) {
     return;
   }
 
+  /*
   printf("decRef: {");
   print_lval(x);
   printf("}\n");
+  */
   switch (x->type) {
     case LVAL_PAIR:
       decRef(x->car);
@@ -316,12 +324,11 @@ void decRef(lval_t* x) {
     case LVAL_ERR:
     case LVAL_PROC:
       x->refCount--;
+      gc_attempt(x);
     case LVAL_SPECIAL:
     case LVAL_BOOL:
       break;
   }
-
-  gc_attempt(x);
 }
 
 /******************
@@ -443,7 +450,7 @@ lval_t* parse_token(char* tok, err_t* err) {
       return parse_list(err);
     case ')':
       return NULL;
-    default: /* has to be and identfier */
+    default: /* has to be an identfier */
       return parse_sym(tok, err);
   }
 
@@ -451,6 +458,10 @@ lval_t* parse_token(char* tok, err_t* err) {
 }
 
 void delimit_tok(char* tok) {
+  if ('\0' == *tok) {
+    return;
+  }
+
   /* single char tokens will be delimited by anything */
   if ('(' == *tok || ')' == *tok) {
     ++INPUT;
@@ -458,26 +469,91 @@ void delimit_tok(char* tok) {
   }
 
   /* otherwise */
-  for (++INPUT; !delimiting_char(INPUT[0]); ++INPUT) {
+  ++INPUT;
+  while (!delimiting_char(INPUT[0])) {
+    ++INPUT;
   }
 }
 
+/* tok starts token and INPUT is first delimiting char
+*/
 lval_t* my_parse(err_t* err) {
-  /* skip trash */
+  // printf("\n\nleft is: *%s*\n\n", INPUT);
+
+  /* skip whitespace and comments */
   skip_trash();
 
-  /* delimit token */
+  /* trash till end means no more input */
+  if ('\0' == INPUT[0]) {
+    return NULL;
+  }
+
+  /* INPUT will skip to first delimiting char */
   char* tok = INPUT;
   delimit_tok(tok);
 
   /* parse into an lval_t* */
   return parse_token(tok, err);
-
-  // TODO root of lvals should be a BEGIN and you should keep reading
-  // until you hit a EOF
 }
 
+/*
+*/
+lval_t* ll_push(lval_t* x, lval_t* xs) {
+  err_t* dummy = malloc(sizeof(err_t));
+  dummy->sig = 0;
+
+  lval_t* base = lval_pair(x, xs, dummy);
+  free(dummy);
+  return base;
+}
+
+/*
+*/
+lval_t* ll_reverse(lval_t* xs) {
+  if (NIL == xs) {
+    return NIL;
+  }
+
+  /* chop */
+  lval_t* old_base = xs;
+  xs = xs->cdr;
+
+  /* special case */
+  old_base->cdr = NIL;
+
+  lval_t* base;
+  while (NIL != xs) {
+    /* chop */
+    base = xs;
+    xs = xs->cdr;
+
+    /* append */
+    base->cdr = old_base;
+    old_base = base;
+  }
+
+  return old_base;
+}
+
+/*
+*/
 lval_t* start_parse(char* input, err_t* err) {
+  INPUT = "(begin)";
+  lval_t* all = my_parse(err);
+
+  INPUT = input;
+  lval_t* x = my_parse(err);
+  while (x) {
+    all = ll_push(x, all);
+    x = my_parse(err);
+  }
+  all = ll_reverse(all);
+  return all;
+}
+
+/*
+*/
+lval_t* single_parse(char* input, err_t* err) {
   INPUT = input;
   lval_t* x = my_parse(err);
   free(input);
@@ -511,7 +587,7 @@ int main(int argc, char* argv[]) {
   sym_env_t* sym_env = SYM_MAP;  // dirty hack to satisfy type system for now
 
   /*** LOAD STDLIB ***/
-  stdlib(sym_env, err);
+  scheme_stdlib(sym_env, err);
 
   /*** REPL ***/
   repl(sym_env, err);
@@ -530,7 +606,7 @@ int main(int argc, char* argv[]) {
 *******************************************************************************/
 lval_t* lisp_exec(sym_env_t* sym_env, char* input, err_t* err) {
   /* read */
-  lval_t* x = start_parse(input, err);
+  lval_t* x = single_parse(input, err);
   // TODO check for bad parse
   if (err->sig) {
     printf("[ERR] Unable to READ lval_t due to insufficient memory\n");
@@ -547,14 +623,16 @@ lval_t* lisp_exec(sym_env_t* sym_env, char* input, err_t* err) {
   return x;
 }
 
-void stdlib(mpc_parser_t* Lispy, sym_env_t* sym_env, err_t* err) {
-  // char** code = ["(define {fun} (lambda {args body} {define (head args)"
-  char** code = [ "(define x 100)", "(define foo (lambda (x) (+ x 1)))", NULL ];
-  lval_t* x;
-  for (; *code; code++) {
-    printf("Read: ^%s^");
-    x = lisp_exec(sym_env, *code, err);
-  }
+void scheme_stdlib(sym_env_t* sym_env, err_t* err) {
+  printf("reading file ....");  // debug
+  char* code = (char*)read_whole_file("std_defs.lisp");
+  printf("done\n");               // debug
+  printf("starting parse ....");  // debug
+  lval_t* x = start_parse(code, err);
+  printf("done\n");  // debug
+  x = eval_lval(sym_env, x, err);
+  decRef(x);
+  free(code);
 }
 
 /*******************************************************************************
@@ -754,8 +832,8 @@ lval_type_t rip_type(lval_t* v) {
 void lval_del_func(lval_t* v) {
   /* if a lambda expression */
   if (!(v->builtin)) {
-    lval_del(v->exp);
-    lval_del(v->parameters);
+    decRef(v->exp);
+    decRef(v->parameters);
   }
 
   /* nothing to delete for builtin functions */
@@ -776,14 +854,13 @@ void lval_del(lval_t* v) {
     case LVAL_BOOL:
     case LVAL_SPECIAL:
     case LVAL_UNDEF:
+    case LVAL_PAIR:
       break;
     case LVAL_ERR:
       free(v->err);
       break;
     case LVAL_SYM:
       free(v->identifier);
-      break;
-    case LVAL_PAIR:
       break;
     case LVAL_PROC:
       lval_del_func(v);
@@ -930,46 +1007,54 @@ void print_lval_func(lval_t* x) {
 /* purpose: dispatch print based on lval type
 */
 void print_lval(lval_t* x) {
-  /* TODO this is nonly here so I don't get segmentation fuaults right now */
+  /* TODO this is only here so I don't get segmentation faults right now */
   if (!x) {
     return;
   }
 
-  printf("[%d]", x->refCount);
+  // printf("[%d]", x->refCount);//debug
   lval_t* a;
   switch (x->type) {
     case LVAL_NUM:
-      printf("%ld ", x->num);
+      // printf("<num>");//debug
+      printf(" %ld", x->num);
       break;
     case LVAL_BOOL:
+      // printf("<bool>");//debug
       if (x->is_true) {
-        printf("#t ");
+        printf(" #t");
       } else {
-        printf("#f ");
+        printf(" #f");
       }
       break;
     case LVAL_SYM:
-      printf("%s ", x->identifier);
+      // printf("<sym>");//debug
+      printf(" %s", x->identifier);
       break;
     case LVAL_ERR:
+      // printf("<err>");//debug
       printf("[ERROR: %s] ", x->err);
       break;
     case LVAL_PAIR:
+      // printf("<pair>");//debug
       printf("(");
       print_lval(x->car);
       for (a = x->cdr; NIL != a; a = a->cdr) {
         print_lval(a->car);
       }
-      printf(") ");
+      printf(")");
       break;
     case LVAL_UNDEF:
-      printf("<undef> ");
+      // printf("<undef>");//debug
+      printf("<undef>");
       break;
     case LVAL_PROC:
+      // printf("<proc>");//debug
       print_lval_func(x);
       break;
     case LVAL_SPECIAL:
-      printf("'() ");
+      // printf("<special>");//debug
+      printf("'()");
       break;
     default:
       fucked_up("print_lval", "this type can't be printed, yo!");
@@ -1011,6 +1096,9 @@ lval_t* eval_list(sym_env_t* sym_env, lval_t* args, err_t* err) {
     } else if (!strcmp("set!", first_sym)) {
       decRef(l_pop(&args));  // remove id
       return builtin_set(sym_env, args, err);
+    } else if (!strcmp("begin", first_sym)) {
+      decRef(l_pop(&args));  // remove id
+      return proc_begin(sym_env, args, err);
     }
   }
 
@@ -1067,12 +1155,11 @@ lval_t* dispatch_lambda(sym_env_t* sym_map,
                         lval_t* func,
                         lval_t* args,
                         err_t* err) {
-  lval_t* params = func->parameters;
-  lval_t* expression = func->exp;
-  func->exp = func->parameters = NULL;
+  lval_t* params = lval_copy(func->parameters, err);
+  lval_t* expression = lval_copy(func->exp, err);
   decRef(func);
 
-  /* symbol env */
+  /* create symbol env */
   // TODO I am just overwriting sym_map here, why do I need to pass it at all?
   sym_map = populate(SYM_MAP, params, args, err);
   if (err->sig) {
@@ -1157,6 +1244,21 @@ lval_t* builtin_define(sym_env_t* sym_env, lval_t* args, err_t* err) {
   }
 
   return lval_undef(err);
+}
+
+/*
+*/
+lval_t* proc_begin(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  lval_t* x = l_pop(&args);
+  lval_t* r = NIL;
+  while (x) {
+    decRef(r);  // TODO is this right?
+    r = eval_lval(sym_env, x, err);
+    x = l_pop(&args);
+  }
+
+  decRef(args);
+  return r;
 }
 
 //======================================
@@ -1302,9 +1404,9 @@ lval_t* proc_quotient(sym_env_t* sym_env, lval_t* args, err_t* err) {
 lval_t* builtin_lambda(sym_env_t* sym_env, lval_t* args, err_t* err) {
   lval_t* parameters = l_pop(&args);
   lval_t* exp = l_pop(&args);
+  decRef(args);
   // TODO again, use lval_empty to check for preconditions
   // this will also involve making sure parameters and exp are not NULL
-  decRef(args);
   return lval_lambda(parameters, exp, err);
 }
 
@@ -1335,10 +1437,10 @@ lval_t* eval_symbol(sym_env_t* sym_env, lval_t* x, err_t* err) {
 ********************************************************************************/
 /*
 */
-char* builtin_names[] = {"eval",    "list",    "car",        "boolean?",
-                         "number?", "symbol?", "procedure?", "pair?",
-                         "eqv?",    "+",       "-",          "*",
-                         "/",       "quote",   NULL};
+char* builtin_names[] = {"begin",    "eval",    "list",    "car",
+                         "boolean?", "number?", "symbol?", "procedure?",
+                         "pair?",    "eqv?",    "+",       "-",
+                         "*",        "/",       "quote",   NULL};
 
 /* dispatch builtin function based on string
 */
@@ -1347,6 +1449,8 @@ builtin_fun* proc_tab(char* x) {
     return builtin_define;
   } else if (!strcmp("quote", x)) {
     return builtin_quote;
+  } else if (!strcmp("begin", x)) {
+    return proc_begin;
   } else if (!strcmp("boolean?", x)) {
     return proc_pred_bool;
   } else if (!strcmp("number?", x)) {
@@ -1503,6 +1607,12 @@ sym_env_t* populate(sym_env_t* parent,
     return NULL;
   }
   sym_map->parent = parent;
+
+  /* debug */
+  puts("parameters are: ");
+  print_lval(parameters);
+  puts("\n-----");
+  /* debug */
 
   /* populate */
   char* sym;
@@ -1786,4 +1896,55 @@ lval_t* builtin_set(sym_env_t* sym_env, lval_t* args, err_t* err) {
   binding->value = value;
 
   return lval_undef(err);
+}
+
+/*******************************************************************************
+* FILE -> STRING
+*******************************************************************************/
+static unsigned get_file_size(const char* file_name) {
+  struct stat sb;
+  if (stat(file_name, &sb) != 0) {
+    fprintf(stderr, "'stat' failed for '%s': %s.\n", file_name,
+            strerror(errno));
+    exit(EXIT_FAILURE);
+  }
+  return sb.st_size;
+}
+
+/* This routine reads the entire file into memory. */
+
+static unsigned char* read_whole_file(const char* file_name) {
+  unsigned s;
+  unsigned char* contents = NULL;
+  FILE* f;
+  size_t bytes_read;
+  int status;
+
+  s = get_file_size(file_name);
+  contents = malloc(s + 1);
+  if (!contents) {
+    fprintf(stderr, "Not enough memory.\n");
+    exit(EXIT_FAILURE);
+  }
+
+  f = fopen(file_name, "r");
+  if (!f) {
+    fprintf(stderr, "Could not open '%s': %s.\n", file_name, strerror(errno));
+    exit(EXIT_FAILURE);
+  }
+  bytes_read = fread(contents, sizeof(unsigned char), s, f);
+  if (bytes_read != s) {
+    fprintf(stderr,
+            "Short read of '%s': expected %u bytes "
+            "but got %lu: %s.\n",
+            file_name, s, bytes_read, strerror(errno));
+    exit(EXIT_FAILURE);
+  }
+  status = fclose(f);
+  if (status != 0) {
+    fprintf(stderr, "Error closing '%s': %s.\n", file_name, strerror(errno));
+    exit(EXIT_FAILURE);
+  }
+  contents[s] = '\0';  // TODO double check this!
+  return contents;
 }
