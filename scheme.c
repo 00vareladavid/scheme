@@ -139,7 +139,12 @@ static unsigned char* read_whole_file(const char* file_name);
 void scheme_stdlib(sym_env_t* sym_env, err_t* err);
 
 // parser
-lval_t* my_parse(err_t* err);
+lval_t* parse_next_lval(err_t* err);
+lval_t* parse_one(char* input, err_t* err);
+lval_t* parse_all(char* input, err_t* err);
+
+void scheme_stdlib(sym_env_t* sym_env, err_t* err);
+void exec_file(sym_env_t* sym_env, char* filename, err_t* err);
 
 // debugging
 char* lval_type_string(lval_type_t);
@@ -219,7 +224,7 @@ lval_t* proc_prod(sym_env_t* sym_env, lval_t* args, err_t* err);
 lval_t* proc_quotient(sym_env_t* sym_env, lval_t* args, err_t* err);
 
 /* symbols */
-sym_env_t* init_global_map(err_t* err);
+void init_global_map(err_t* err);
 void push_builtin(sym_env_t* sym_map, char* fun_name, err_t* err);
 bool symbol_add(sym_env_t* sym_map, char* symbol, lval_t* value, err_t* err);
 void kv_push(sym_env_t* sym_map, char* key, lval_t* value, err_t* err);
@@ -249,9 +254,15 @@ char* strdup(char* input, err_t* err) {
 /*
 */
 sym_env_t* SYM_MAP;
-static lval_t* NIL;
-static lval_t* L_T;
-static lval_t* L_F;
+
+/* SPECIAL SCHEME VALUES */
+// TODO is there a more succinct way?
+static lval_t nil_x = {.type = LVAL_SPECIAL};
+static lval_t* NIL = &nil_x;
+static lval_t l_true = {.type = LVAL_BOOL, .is_true = true};
+static lval_t* LISP_TRUE = &l_true;
+static lval_t l_false = {.type = LVAL_BOOL, .is_true = false};
+static lval_t* LISP_FALSE = &l_false;
 
 /******************
 * GC
@@ -274,9 +285,6 @@ lval_t* incRef(lval_t* x) {
       break;
   }
 
-  printf("incRef: {");
-  print_lval(x);
-  printf("| %d }\n", x->refCount);
   return x;
 }
 
@@ -367,9 +375,9 @@ void skip_trash(void) {
 lval_t* parse_bool(char* tok, err_t* err) {
   lval_t* x;
   if ('t' == tok[0]) {
-    x = get_bool(true);
+    x = LISP_TRUE;
   } else if ('f' == tok[0]) {
-    x = get_bool(false);
+    x = LISP_FALSE;
   } else {
     puts("1 unknown reader macro");
     exit(1);
@@ -407,8 +415,8 @@ lval_t* parse_num(char* tok, err_t* err) {
 lval_t* parse_list(err_t* err) {
   lval_t* root = NIL;
   lval_t* x = NULL;
-  for (lval_t* next_child = my_parse(err); next_child;
-       next_child = my_parse(err)) {
+  for (lval_t* next_child = parse_next_lval(err); next_child;
+       next_child = parse_next_lval(err)) {
     if (NIL == root) {
       /* root is now a pair, not an empty_list */
       root = lval_pair(next_child, NIL, err);
@@ -475,11 +483,10 @@ void delimit_tok(char* tok) {
   }
 }
 
-/* tok starts token and INPUT is first delimiting char
+/* Purpose: parse a single lval from the INPUT stream
+ * Warning: this function should not be called directly
 */
-lval_t* my_parse(err_t* err) {
-  // printf("\n\nleft is: *%s*\n\n", INPUT);
-
+lval_t* parse_next_lval(err_t* err) {
   /* skip whitespace and comments */
   skip_trash();
 
@@ -535,28 +542,44 @@ lval_t* ll_reverse(lval_t* xs) {
   return old_base;
 }
 
-/*
+/* Purpose: iteratively parse a stream
+ * Return: all lvals (in order) wrapped in a `begin` expression
 */
-lval_t* start_parse(char* input, err_t* err) {
-  INPUT = "(begin)";
-  lval_t* all = my_parse(err);
+lval_t* parse_all(char* input, err_t* err) {
+  /* set up container */
+  lval_t* all = lval_sym("begin", err);
+  all = lval_pair(all, NIL, err);
 
+  /* use push+reverse to efficiently read list */
   INPUT = input;
-  lval_t* x = my_parse(err);
+  lval_t* x = parse_next_lval(err);
   while (x) {
     all = ll_push(x, all);
-    x = my_parse(err);
+    x = parse_next_lval(err);
   }
   all = ll_reverse(all);
+
   return all;
+}
+
+/* Purpose: parse next lval in a stream
+*/
+lval_t* parse_one(char* input, err_t* err) {
+  INPUT = input;
+  lval_t* x = parse_next_lval(err);
+  free(input);
+  return x;
 }
 
 /*
 */
-lval_t* single_parse(char* input, err_t* err) {
-  INPUT = input;
-  lval_t* x = my_parse(err);
-  free(input);
+err_t* set_base_err(void) {
+  err_t* x = malloc(sizeof(err_t));
+  if (!x) {
+    printf("1 insufficient mem for baseline framework\n");
+    exit(1);
+  }
+  x->sig = OK;
   return x;
 }
 
@@ -564,40 +587,21 @@ lval_t* single_parse(char* input, err_t* err) {
 * MAIN
 ********************************************************************************/
 int main(int argc, char* argv[]) {
-  /* error struct */
-  err_t* err = malloc(sizeof(err_t));
-  if (!err) {
-    printf("1 insufficient mem for baseline framework\n");
-    exit(1);
-  }
-  err->sig = OK;
+  /* Initialize */
+  err_t* err = set_base_err();
+  init_global_map(err);
 
-  /* SPECIAL VALUES */
-  NIL = lval_special(err);
-  L_T = lval_bool(true, err);
-  L_F = lval_bool(false, err);
-
-  /* symbol env */
-  SYM_MAP = init_global_map(err);
-  if (err->sig) {
-    free(err);
-    printf("2 insufficient mem for baseline framework\n");
-    exit(1);
-  }
   sym_env_t* sym_env = SYM_MAP;  // dirty hack to satisfy type system for now
 
-  /*** LOAD STDLIB ***/
+  /* Load STDLIB */
   scheme_stdlib(sym_env, err);
 
-  /*** REPL ***/
+  /* REPL */
   repl(sym_env, err);
 
-  /*** CLEAN ***/
+  /* CLEAN */
   sym_map_del(SYM_MAP);
   free(err);
-  free(NIL);
-  free(L_T);
-  free(L_F);
   return 0;
 }
 
@@ -606,7 +610,7 @@ int main(int argc, char* argv[]) {
 *******************************************************************************/
 lval_t* lisp_exec(sym_env_t* sym_env, char* input, err_t* err) {
   /* read */
-  lval_t* x = single_parse(input, err);
+  lval_t* x = parse_one(input, err);
   // TODO check for bad parse
   if (err->sig) {
     printf("[ERR] Unable to READ lval_t due to insufficient memory\n");
@@ -623,15 +627,19 @@ lval_t* lisp_exec(sym_env_t* sym_env, char* input, err_t* err) {
   return x;
 }
 
+/*
+*/
 void scheme_stdlib(sym_env_t* sym_env, err_t* err) {
-  printf("reading file ....");  // debug
-  char* code = (char*)read_whole_file("std_defs.lisp");
-  printf("done\n");               // debug
-  printf("starting parse ....");  // debug
-  lval_t* x = start_parse(code, err);
-  printf("done\n");  // debug
+  exec_file(sym_env, "std_defs.lisp", err);
+}
+
+/*
+*/
+void exec_file(sym_env_t* sym_env, char* filename, err_t* err) {
+  char* code = (char*)read_whole_file(filename);
+  lval_t* x = parse_all(code, err);
   x = eval_lval(sym_env, x, err);
-  decRef(x);
+  decRef(x); /* discard, only executing for side effects */
   free(code);
 }
 
@@ -659,8 +667,8 @@ void repl(sym_env_t* sym_env, err_t* err) {
   while (strcmp(input, "QUIT")) {
     x = lisp_exec(sym_env, input, err);
     /* if error: reset signal and skip printing */
-    if (err->sig) {  // TODO I am throwing all kinds of errors together,
-                     // seperate them
+    if (err->sig) {  
+      /* TODO I am throwing all kinds of errors together, seperate them */
       err->sig = OK;
     } else {
       print_lval(x);
@@ -728,14 +736,13 @@ lval_t* lval_bool(bool x, err_t* err) {
   return v;
 }
 
-/*
+/* Purpose: returns global LVAL_BOOL value
 */
 lval_t* get_bool(bool x) {
   if (x) {
-    return L_T;
+    return LISP_TRUE;
   }
-
-  return L_F;
+  return LISP_FALSE;
 }
 
 /*
@@ -1113,8 +1120,8 @@ lval_t* eval_list(sym_env_t* sym_env, lval_t* args, err_t* err) {
   if (LVAL_PROC != func->type) {
     decRef(func);
     decRef(args);
-    return lval_err("1st element of list is not a func",
-                    err); /* propagate error */
+    /* propagate error */
+    return lval_err("1st element of list is not a func", err); 
   }
 
   /* dispatch */
@@ -1487,10 +1494,12 @@ builtin_fun* proc_tab(char* x) {
 
 /*
 */
-sym_env_t* init_global_map(err_t* err) {
+void init_global_map(err_t* err) {
   sym_env_t* sym_map = sym_map_make(err);
   if (err->sig) {
-    return NULL;
+    free(err);
+    printf("2 insufficient mem for baseline framework\n");
+    exit(1);
   }
 
   char* x;
@@ -1498,14 +1507,20 @@ sym_env_t* init_global_map(err_t* err) {
     push_builtin(sym_map, x, err);
     if (err->sig) {
       sym_map_del(sym_map);
-      return NULL;
+      printf("2 insufficient mem for baseline framework\n");
+      exit(1);
     }
   }
 
-  symbol_add(sym_map, strdup("#t", err), get_bool(true), err);
-  symbol_add(sym_map, strdup("#f", err), get_bool(false), err);
+  symbol_add(sym_map, strdup("#t", err), LISP_TRUE, err);
+  symbol_add(sym_map, strdup("#f", err), LISP_FALSE, err);
 
-  return sym_map;
+  if (err->sig) {
+    free(err);
+    printf("2 insufficient mem for baseline framework\n");
+    exit(1);
+  }
+  SYM_MAP = sym_map;
 }
 
 /*
@@ -1549,7 +1564,7 @@ void sym_map_del(sym_env_t* sym_map) {
   while (binding) {
     next_binding = binding->sibling;
     free(binding->key);
-    decRef(binding->value);  // debug
+    decRef(binding->value);
     free(binding);
     binding = next_binding;
   }
@@ -1607,12 +1622,6 @@ sym_env_t* populate(sym_env_t* parent,
     return NULL;
   }
   sym_map->parent = parent;
-
-  /* debug */
-  puts("parameters are: ");
-  print_lval(parameters);
-  puts("\n-----");
-  /* debug */
 
   /* populate */
   char* sym;
@@ -1760,7 +1769,7 @@ lval_t* scm_rip_one_arg(lval_t* args) {
 lval_t* proc_pred_bool(sym_env_t* sym_map, lval_t* args, err_t* err) {
   lval_t* x = scm_rip_one_arg(args);
   if (NIL == x) {
-    return get_bool(false);
+    return LISP_FALSE;
   }
   return scheme_type_predicate(LVAL_BOOL, x, err);
 }
@@ -1768,7 +1777,7 @@ lval_t* proc_pred_bool(sym_env_t* sym_map, lval_t* args, err_t* err) {
 lval_t* proc_pred_num(sym_env_t* sym_map, lval_t* args, err_t* err) {
   lval_t* x = scm_rip_one_arg(args);
   if (NIL == x) {
-    return get_bool(false);
+    return LISP_FALSE;
   }
   return scheme_type_predicate(LVAL_NUM, x, err);
 }
@@ -1776,7 +1785,7 @@ lval_t* proc_pred_num(sym_env_t* sym_map, lval_t* args, err_t* err) {
 lval_t* proc_pred_sym(sym_env_t* sym_map, lval_t* args, err_t* err) {
   lval_t* x = scm_rip_one_arg(args);
   if (NIL == x) {
-    return get_bool(false);
+    return LISP_FALSE;
   }
   return scheme_type_predicate(LVAL_SYM, x, err);
 }
@@ -1784,7 +1793,7 @@ lval_t* proc_pred_sym(sym_env_t* sym_map, lval_t* args, err_t* err) {
 lval_t* proc_pred_fun(sym_env_t* sym_map, lval_t* args, err_t* err) {
   lval_t* x = scm_rip_one_arg(args);
   if (NIL == x) {
-    return get_bool(false);
+    return LISP_FALSE;
   }
   return scheme_type_predicate(LVAL_PROC, x, err);
 }
@@ -1792,7 +1801,7 @@ lval_t* proc_pred_fun(sym_env_t* sym_map, lval_t* args, err_t* err) {
 lval_t* proc_pred_pair(sym_env_t* sym_map, lval_t* args, err_t* err) {
   lval_t* x = scm_rip_one_arg(args);
   if (NIL == x) {
-    return get_bool(false);
+    return LISP_FALSE;
   }
   return scheme_type_predicate(LVAL_PAIR, x, err);
 }
@@ -1804,13 +1813,13 @@ lval_t* proc_pred_eqv(sym_env_t* sym_map, lval_t* args, err_t* err) {
 
   /* deal with empty list */
   if ((NIL == a) && (NIL == b)) {
-    return get_bool(true);
+    return LISP_TRUE;
   }
 
   /* if not same type, can't be  eqv */
   if (a->type != b->type) {
     lval_clean(a, b);
-    return get_bool(false);
+    return LISP_FALSE;
   }
 
   bool x = false;
@@ -1912,7 +1921,6 @@ static unsigned get_file_size(const char* file_name) {
 }
 
 /* This routine reads the entire file into memory. */
-
 static unsigned char* read_whole_file(const char* file_name) {
   unsigned s;
   unsigned char* contents = NULL;
