@@ -1,0 +1,15 @@
+#!/usr/bin/env dash
+
+filename="$@"
+testfile="xx123h.c"
+
+echo "Testing header file"
+echo "====="
+
+echo '#include "'"$filename"'.h"' > "$testfile"
+./build "$testfile"
+
+echo "Testing c file"
+echo "====="
+
+./build "${filename}.c"
