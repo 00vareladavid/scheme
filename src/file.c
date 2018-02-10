@@ -1,3 +1,10 @@
+#include "file.h"
+#include <string.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+
 /*
  */
 static unsigned get_file_size(const char* file_name) {
@@ -11,7 +18,7 @@ static unsigned get_file_size(const char* file_name) {
 }
 
 /* This routine reads the entire file into memory. */
-static unsigned char* read_whole_file(const char* file_name) {
+unsigned char* read_whole_file(const char* file_name) {
   unsigned s;
   unsigned char* contents = NULL;
   FILE* f;

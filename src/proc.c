@@ -4,9 +4,21 @@
 #include "lval_util.h"
 #include "proc_util.h"
 #include "eval.h"
+#include "sym_env.h"
+#include "gc.h"
+#include <stdlib.h>
+
 /*******************************************************************************
 * Internal
 *******************************************************************************/
+/* Note: only `#f` is false, everything else is true
+ */
+bool scheme_true(lval_t* x) {
+  if(LVAL_BOOL == x->type) {
+    return x->is_true;
+  }
+  return true;
+}
 
 /*******************************************************************************
 * External
@@ -20,7 +32,7 @@ lval_t* builtin_define(sym_env_t* sym_env, lval_t* args, err_t* err) {
     return lval_err("DEFINE : incorrect number of arguments", err);
   }
 
-  if (!scheme_assert_type(LVAL_SYM, one)) {
+  if (LVAL_SYM != one->type) {
     return lval_err("DEFINE : first arg should be a symbol", err);
   }
   char* symbol = rip_sym(one, err);
@@ -62,6 +74,8 @@ lval_t* proc_begin(sym_env_t* sym_env, lval_t* args, err_t* err) {
  * - what you want to return is already in a list, just label it a qexp
  */
 lval_t* proc_list(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   if (NIL == args) {
     return NIL;
   }
@@ -73,6 +87,8 @@ lval_t* proc_list(sym_env_t* sym_env, lval_t* args, err_t* err) {
 /*
  */
 lval_t* builtin_head(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   // check inputs
   /*
   if( 1 != args->count ) {
@@ -101,6 +117,8 @@ lval_t* builtin_head(sym_env_t* sym_env, lval_t* args, err_t* err) {
 /*
  */
 lval_t* builtin_tail(sym_env_t* sym_env, lval_t* x, err_t* err) {
+  silence(sym_env);
+  silence(err);
   /*
   //check good state
   if( 1 != args->count ) {
@@ -121,12 +139,18 @@ lval_t* builtin_tail(sym_env_t* sym_env, lval_t* x, err_t* err) {
 /*
  */
 lval_t* builtin_join(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(args);
+  silence(err);
   return NULL;
 }
 
 /*
  */
 lval_t* builtin_eval(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(args);
+  silence(err);
   return NULL;
   //##  /*
   //##  if( 1 != args->count ) {
@@ -148,6 +172,8 @@ lval_t* builtin_eval(sym_env_t* sym_env, lval_t* args, err_t* err) {
  * level
  */
 lval_t* proc_sum(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   lval_t* x = l_pop(&args);
   for (lval_t* y = l_pop(&args); y; y = l_pop(&args)) {
     x->num += y->num;
@@ -162,6 +188,8 @@ lval_t* proc_sum(sym_env_t* sym_env, lval_t* args, err_t* err) {
 /*
  */
 lval_t* proc_minus(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   lval_t* x = l_pop(&args);
   for (lval_t* y = l_pop(&args); y; y = l_pop(&args)) {
     x->num -= y->num;
@@ -176,6 +204,8 @@ lval_t* proc_minus(sym_env_t* sym_env, lval_t* args, err_t* err) {
 /*
  */
 lval_t* proc_prod(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   lval_t* x = l_pop(&args);
   for (lval_t* y = l_pop(&args); y; y = l_pop(&args)) {
     x->num *= y->num;
@@ -190,6 +220,8 @@ lval_t* proc_prod(sym_env_t* sym_env, lval_t* args, err_t* err) {
 /*
  */
 lval_t* proc_quotient(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   lval_t* x = l_pop(&args);
   for (lval_t* y = l_pop(&args); y; y = l_pop(&args)) {
     x->num /= y->num;
@@ -204,6 +236,7 @@ lval_t* proc_quotient(sym_env_t* sym_env, lval_t* args, err_t* err) {
 /*
  */
 lval_t* builtin_lambda(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
   lval_t* parameters = l_pop(&args);
   lval_t* exp = l_pop(&args);
   decRef(args);
@@ -214,7 +247,9 @@ lval_t* builtin_lambda(sym_env_t* sym_env, lval_t* args, err_t* err) {
 
 /*
  */
-lval_t* builtin_quote(sym_env_t* sym_map, lval_t* args, err_t* err) {
+lval_t* builtin_quote(sym_env_t* sym_env, lval_t* args, err_t* err) {
+  silence(sym_env);
+  silence(err);
   lval_t* x = l_pop(&args);  // WARNING not error checking
   return x;
 }
@@ -245,12 +280,12 @@ lval_t* builtin_if(sym_env_t* sym_map, lval_t* args, err_t* err) {
  * of the list
  */
 lval_t* proc_car(sym_env_t* sym_env, lval_t* args, err_t* err) {
-  if (!expect_count(args, 1)) {
-    decRef(args);
+  silence(sym_env);
+  lval_t* first;
+  if (extract_arg(args,1,&first) ) {
     return lval_err("CAR : more than 1 arg", err);
   }
 
-  lval_t* first = lval_rip(args);
   lval_t* x = first->car;
   incRef(x);
   decRef(first);  // TODO is this right?
@@ -266,9 +301,11 @@ lval_t* builtin_set(sym_env_t* sym_env, lval_t* args, err_t* err) {
   decRef(args);
 
   /* search for binding */
-  char* sym = rip_sym(variable);
+  char* sym = rip_sym(variable, err);
   binding_t* binding = sym_search(sym_env, sym);
+  free(sym);
   if (!binding) {
+    /*
     char* err_msg = malloc((strlen("symbol [] is unbound") + 1 + strlen(sym)) *
                            sizeof(char));
     sprintf(err_msg, "symbol [%s] is unbound", sym);
@@ -276,8 +313,9 @@ lval_t* builtin_set(sym_env_t* sym_env, lval_t* args, err_t* err) {
     lval_t* a = lval_err(err_msg, err);
     free(err_msg);
     return a;
+    */
+    return lval_err("symbol unbound", err);
   }
-  free(sym);
 
   /* evaluate expression and set new value */
   lval_t* value = eval_lval(sym_env, expression, err);

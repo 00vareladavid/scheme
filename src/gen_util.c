@@ -17,14 +17,23 @@ size_t inc_size(size_t x) {
 
 /*
  */
-char* strdup(char* input, err_t* err) {
+char* strdup(const char* input) {
   char* x = calloc(inc_size(strlen(input)), sizeof(char));
-  if (!x) {
+  if(x) {
+    strcpy(x, input);
+  }
+  return x;
+}
+
+/*
+ */
+char* strdup_e(char* input, err_t* err) {
+  char* x = strdup(input);
+  if(!x) {
     err->sig = OUT_OF_MEM;
     return NULL;
   }
 
-  strcpy(x, input);
   return x;
 }
 

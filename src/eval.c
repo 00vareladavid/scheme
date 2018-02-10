@@ -3,10 +3,45 @@
 #include "lval_type.h"
 #include "lval_util.h"
 #include "gen_util.h"
+#include "proc.h"
+#include "gc.h"
+#include <stdlib.h>
+#include <string.h> //TODO remove once you clean up eval_list
 
 /******************************************************************************
 * Internal
 ******************************************************************************/
+lval_t* eval_children(sym_env_t* sym_env, lval_t* parent, err_t* err);
+lval_t* dispatch_lambda(sym_env_t* sym_map,
+                        lval_t* func,
+                        lval_t* args,
+                        err_t* err);
+lval_t* eval_list(sym_env_t* sym_env, lval_t* args, err_t* err);
+lval_t* eval_symbol(sym_env_t* sym_env, lval_t* x, err_t* err);
+
+/* look for symbol, if value found, return a copy
+*/
+lval_t* eval_symbol(sym_env_t* sym_env, lval_t* x, err_t* err) {
+  char* sym = rip_sym(x, err);
+  binding_t* binding = sym_search(sym_env, sym);
+  free(sym);
+  if (!binding) {
+    /*
+    char* err_msg = malloc(
+        (strlen("symbol [] is not bound") + 1 + strlen(sym)) * sizeof(char));
+    sprintf(err_msg, "symbol [%s] is not bound", sym);
+    free(sym);
+    lval_t* a = lval_err(err_msg, err);
+    free(err_msg);
+    return a;
+    */
+    return lval_err("symbol unbound", err);
+  }
+
+  /* TODO it should actually return a pointer to the value directly */
+  return incRef(binding->value);
+}
+
 /*
 */
 lval_t* eval_children(sym_env_t* sym_env, lval_t* parent, err_t* err) {
@@ -29,7 +64,7 @@ lval_t* dispatch_lambda(sym_env_t* sym_map,
 
   /* create symbol env */
   // TODO I am just overwriting sym_map here, why do I need to pass it at all?
-  sym_map = populate(SYM_MAP, params, args, err);
+  sym_map = simple_populate(params, args, err);
   if (err->sig) {
     return lval_clean(expression, NULL);
   }  // couldn't populate
@@ -49,6 +84,7 @@ lval_t* dispatch_lambda(sym_env_t* sym_map,
 */
 lval_t* eval_list(sym_env_t* sym_env, lval_t* args, err_t* err) {
   /* binding constructs and definitions and special procedures? */
+  //TODO a lot of fluff here!!
   if (LVAL_SYM == args->car->type) {
     char* first_sym = args->car->identifier;
     if (!strcmp("quote", first_sym)) {
@@ -121,3 +157,5 @@ lval_t* eval_lval(sym_env_t* sym_env, lval_t* v, err_t* err) {
   }
   return NULL; /* should not be reached, just to shut up compiler */
 }
+
+

@@ -27,10 +27,6 @@ char* rip_sym(lval_t* v, err_t* err);
 */
 lval_type_t rip_type(lval_t* v); 
 
-/* Free the memory used by up to two lvals
-*/
-lval_t* lval_clean(lval_t* a, lval_t* b); 
-
 /*
 */
 lval_t* lval_rip(lval_t* pair); 

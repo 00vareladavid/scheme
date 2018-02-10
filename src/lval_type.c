@@ -1,6 +1,6 @@
 #include "lval_type.h"
 #include "gen_util.h"
-#include "lval_util.h"
+#include "gc.h"
 #include <stdlib.h>
 
 /* SPECIAL SCHEME VALUES */
@@ -91,7 +91,7 @@ lval_t* lval_err(char* err_msg, err_t* err) {
     return NULL;
   }
 
-  v->err = strdup(err_msg, err);
+  v->err = strdup_e(err_msg, err);
   if (err->sig) {
     return lval_clean(v, NULL);
   }
@@ -106,7 +106,7 @@ lval_t* lval_sym(char* sym_string, err_t* err) {
     return NULL;
   }
 
-  v->identifier = strdup(sym_string, err);
+  v->identifier = strdup_e(sym_string, err);
   if (err->sig) {
     return lval_clean(v, NULL);
   }

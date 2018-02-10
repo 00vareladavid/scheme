@@ -1,6 +1,6 @@
 #!/usr/bin/env dash
 
-c_file="scheme.c"
+c_file="src/main.c"
 x_file="scheme"
 err_file="err.ascii"
 
@@ -16,15 +16,12 @@ memcheck() {
 }
 
 build () {
-  other_opts="-fdiagnostics-color=always"
-  copts="-std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow"
-  #TODO remove these flags once you finish reimplementing builtin functions"
-  passes="-Wno-unused-parameter"
-  input_files="${c_file} linenoise/linenoise.o mpc/mpc.o"
-  
-  nix-shell -p gcc binutils \
-            --command "gcc -g ${other_opts} ${copts} ${passes} ${input_files} -lm -o ${x_file}" \
-    >"$err_file" 2>&1 
+  echo "Building"
+  cd src
+  nix-shell -p gcc binutils gnumake --run "make scheme"
+
+  echo "Finishing"
+  cd ..
 }
 
 run () {

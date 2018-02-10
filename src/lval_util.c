@@ -40,7 +40,7 @@ lval_t* ll_reverse(lval_t* xs) {
 /*
 */
 char* rip_sym(lval_t* v, err_t* err) {
-  char* x = strdup(v->identifier, err);
+  char* x = strdup_e(v->identifier, err);
   decRef(v);
   return x;
 }
@@ -51,14 +51,6 @@ lval_type_t rip_type(lval_t* v) {
   lval_type_t x = v->type;
   decRef(v);
   return x;
-}
-
-/* Free the memory used by up to three lvals
-*/
-lval_t* lval_clean(lval_t* a, lval_t* b) {
-  decRef(a);
-  decRef(b);
-  return NULL;
 }
 
 /*

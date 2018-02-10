@@ -11,6 +11,7 @@ struct err_t {
 typedef struct err_t err_t;
 
 /**************************************/
-size_t incSize(size_t x);
-char* strdup(char* input, err_t* err);
+size_t inc_size(size_t x);
+char* strdup(const char* input);
+char* strdup_e(char* input, err_t* err);
 void fucked_up(char* function_name, char* err_msg);

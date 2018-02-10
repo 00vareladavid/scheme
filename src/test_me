@@ -1,5 +1,10 @@
 #!/usr/bin/env dash
 
+build () {
+  local flags="-g -std=c11 -Wall -Wextra -Wpedantic -Werror -Wshadow -c"
+  nix-shell -p gcc binutils --run "gcc ${flags} ${1}"
+}
+
 filename="$@"
 testfile="xx123h.c"
 
@@ -7,9 +12,9 @@ echo "Testing header file"
 echo "====="
 
 echo '#include "'"$filename"'.h"' > "$testfile"
-./build "$testfile"
+build "$testfile"
 
 echo "Testing c file"
 echo "====="
 
-./build "${filename}.c"
+build "${filename}.c"

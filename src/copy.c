@@ -1,6 +1,6 @@
 #include "copy.h"
 #include "lval_type.h"
-#include "lval_util.h"
+#include "gc.h"
 #include "gen_util.h"
 
 /*******************************************************************************

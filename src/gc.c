@@ -123,3 +123,11 @@ void decRef(lval_t* x) {
       break;
   }
 }
+
+/*
+ */
+lval_t* lval_clean(lval_t* a, lval_t* b) {
+  decRef(a);
+  decRef(b);
+  return NULL;
+}

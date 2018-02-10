@@ -1,7 +1,10 @@
 #include "repl.h"
 #include "gen_util.h"
 #include "print.h"
-#include "linenoise/linenoise.h"
+#include "parse.h"
+#include "linenoise.h"
+#include "gc.h"
+#include "eval.h"
 #include <stdio.h>
 //TODO get rid of `string.h` when you moved to ctrl+c instead of QUIT
 #include <string.h> 
@@ -9,6 +12,26 @@
 /*******************************************************************************
 * INTERNAL
 *******************************************************************************/
+/*
+ */
+lval_t* lisp_exec(sym_env_t* sym_env, char* input, err_t* err) {
+  /* read */
+  lval_t* x = parse_one(input, err);
+  // TODO check for bad parse
+  if (err->sig) {
+    printf("[ERR] Unable to READ lval_t due to insufficient memory\n");
+    return lval_clean(x, NULL);
+  }
+
+  /* eval */
+  x = eval_lval(sym_env, x, err);
+  if (err->sig) {
+    printf("[ERR] Unable to EVAL lval due to insufficient memory\n");
+    return lval_clean(x, NULL);
+  }
+
+  return x;
+}
 
 /*
  */
